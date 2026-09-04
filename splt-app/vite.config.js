@@ -7,7 +7,7 @@ export default defineConfig({
     react(),
     VitePWA({
       registerType: "autoUpdate",
-      includeAssets: ["icon-192.png", "icon-512.png"],
+      includeAssets: ["icon-192.png", "icon-512.png", "pizza-mark.png"],
       manifest: {
         name: "Splt",
         short_name: "Splt",
