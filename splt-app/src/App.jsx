@@ -18,6 +18,7 @@ import {
   Pencil,
   Trash2,
   Camera,
+  MoreVertical,
   UserPlus,
   Wallet,
   Activity,
@@ -123,8 +124,7 @@ function PizzaMark({ size = 40 }) {
 // ---------- Birthdate: 3-wheel picker ----------
 function DOBPicker({ c, day, month, year, onChange }) {
   const days = Array.from({ length: 31 }, (_, i) => i + 1);
-  const thisYear = new Date().getFullYear();
-  const years = Array.from({ length: 100 }, (_, i) => thisYear - i);
+  const years = Array.from({ length: 2012 - 1945 + 1 }, (_, i) => 2012 - i);
 
   const wheelStyle = {
     ...inputStyle(c),
@@ -262,11 +262,11 @@ function Modal({ c, onClose, title, children }) {
   );
 }
 
-function TopBar({ c, dark, setDark, title }) {
+function TopBar({ c, dark, setDark, title, logoSize = 24 }) {
   return (
     <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "16px 20px 14px", borderBottom: `1px solid ${c.border}`, background: c.bg, position: "sticky", top: 0, zIndex: 5 }}>
       <div style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0 }}>
-        <PizzaMark size={24} />
+        <PizzaMark size={logoSize} />
         <h1 style={{ fontSize: 19, fontWeight: 700, margin: 0, letterSpacing: "-0.01em", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{title}</h1>
       </div>
       <button
@@ -373,9 +373,10 @@ export default function App() {
 
   async function loadProfile(userId, email) {
     const { data, error } = await supabase.from("profiles").select("*").eq("id", userId).single();
-    if (error || !data) return false;
-    setMe({ firstName: data.first_name, lastName: data.last_name, email, birthdate: data.birthdate });
-    return true;
+    if (error || !data) return null;
+    const profile = { firstName: data.first_name, lastName: data.last_name, email, birthdate: data.birthdate };
+    setMe(profile);
+    return profile;
   }
 
   async function loadProjects() {
@@ -396,6 +397,7 @@ export default function App() {
       id: g.id,
       name: g.name,
       photo: g.photo_url,
+      inviteCode: g.invite_code,
       participants: (membersData || []).filter((m) => m.group_id === g.id).map((m) => ({ id: m.id, name: m.display_name })),
       expenses: (expensesData || [])
         .filter((e) => e.group_id === g.id)
@@ -417,12 +419,17 @@ export default function App() {
     let active = true;
     supabase.auth.getSession().then(async ({ data: { session: existingSession } }) => {
       if (!active) return;
+      const codeFromUrl = new URLSearchParams(window.location.search).get("join");
       if (existingSession) {
         setSession(existingSession);
-        const ok = await loadProfile(existingSession.user.id, existingSession.user.email);
-        if (ok) {
+        const profile = await loadProfile(existingSession.user.id, existingSession.user.email);
+        if (profile) {
           setScreen("main");
-          await loadProjects();
+          if (codeFromUrl) {
+            await joinGroupByCode(codeFromUrl, `${profile.firstName} ${profile.lastName}`);
+          } else {
+            await loadProjects();
+          }
         }
       }
       setAuthChecked(true);
@@ -442,15 +449,34 @@ export default function App() {
     };
   }, []);
 
+  const [pendingInviteCode, setPendingInviteCode] = useState(null);
+  useEffect(() => {
+    const code = new URLSearchParams(window.location.search).get("join");
+    if (code) setPendingInviteCode(code);
+  }, []);
+
+  async function joinGroupByCode(code, displayName) {
+    const { data, error } = await supabase.rpc("join_group_by_invite", { code, member_name: displayName });
+    if (error) {
+      alert("Der Einladungslink ist ungültig oder abgelaufen.");
+      return;
+    }
+    window.history.replaceState({}, "", window.location.pathname);
+    setPendingInviteCode(null);
+    await loadProjects();
+    setActiveProjectId(data);
+  }
+
   async function handleAuthed(newSession, profileFromSignup) {
     setSession(newSession);
-    if (profileFromSignup) {
-      setMe(profileFromSignup);
-    } else {
-      await loadProfile(newSession.user.id, newSession.user.email);
-    }
+    const profile = profileFromSignup || (await loadProfile(newSession.user.id, newSession.user.email));
+    if (profileFromSignup) setMe(profileFromSignup);
     setScreen("main");
-    await loadProjects();
+    if (pendingInviteCode && profile) {
+      await joinGroupByCode(pendingInviteCode, `${profile.firstName} ${profile.lastName}`);
+    } else {
+      await loadProjects();
+    }
   }
 
   async function handleLogout() {
@@ -477,9 +503,19 @@ export default function App() {
       alert("Fehler beim Anlegen der Teilnehmer: " + mErr.message);
       return;
     }
-    const newProject = { id: group.id, name: group.name, photo: group.photo_url, participants: members.map((m) => ({ id: m.id, name: m.display_name })), expenses: [] };
+    const newProject = { id: group.id, name: group.name, photo: group.photo_url, inviteCode: group.invite_code, participants: members.map((m) => ({ id: m.id, name: m.display_name })), expenses: [] };
     setProjects((prev) => [newProject, ...prev]);
     setActiveProjectId(group.id);
+  }
+
+  async function deleteGroup(id) {
+    const { error } = await supabase.from("groups").delete().eq("id", id);
+    if (error) {
+      alert("Fehler beim Löschen: " + error.message);
+      return;
+    }
+    setProjects((prev) => prev.filter((p) => p.id !== id));
+    setActiveProjectId(null);
   }
 
   function updateProject(id, fn) {
@@ -508,9 +544,9 @@ export default function App() {
 
         {screen === "onboarding" && (
           <>
-            <TopBar c={c} dark={dark} setDark={setDark} title="Willkommen" />
+            <TopBar c={c} dark={dark} setDark={setDark} title="Willkommen bei vSplit" logoSize={40} />
             <div style={{ flex: 1, overflowY: "auto" }}>
-              <Auth c={c} onAuthed={handleAuthed} />
+              <Auth c={c} onAuthed={handleAuthed} invited={!!pendingInviteCode} />
             </div>
           </>
         )}
@@ -529,14 +565,22 @@ export default function App() {
               )}
               {mainTab === "freunde" && <FreundeTab c={c} />}
               {mainTab === "aktivitaeten" && <AktivitaetenTab c={c} projects={projects} />}
-              {mainTab === "account" && <AccountTab c={c} me={me} onLogout={handleLogout} />}
+              {mainTab === "account" && (
+                <AccountTab
+                  c={c}
+                  me={me}
+                  projects={projects}
+                  onOpenGroup={(id) => setActiveProjectId(id)}
+                  onLogout={handleLogout}
+                />
+              )}
             </div>
             <BottomNav c={c} active={mainTab} setActive={setMainTab} />
           </>
         )}
 
         {screen === "main" && activeProject && (
-          <ProjectDetailScreen c={c} me={myName} project={activeProject} onBack={() => setActiveProjectId(null)} onUpdate={(fn) => updateProject(activeProject.id, fn)} />
+          <ProjectDetailScreen c={c} me={myName} project={activeProject} onBack={() => setActiveProjectId(null)} onUpdate={(fn) => updateProject(activeProject.id, fn)} onDeleteGroup={deleteGroup} />
         )}
       </div>
     </div>
@@ -544,7 +588,7 @@ export default function App() {
 }
 
 // ---------- Auth (Login / Registrierung) ----------
-function Auth({ c, onAuthed }) {
+function Auth({ c, onAuthed, invited }) {
   const [mode, setMode] = useState("signup");
   const [form, setForm] = useState({ firstName: "", lastName: "", email: "", password: "" });
   const [dob, setDob] = useState({ day: "", month: "", year: "" });
@@ -553,7 +597,7 @@ function Auth({ c, onAuthed }) {
   const [awaitingConfirm, setAwaitingConfirm] = useState(false);
 
   const dobValid = dob.day && dob.month && dob.year;
-  const passwordValid = form.password.length >= 5;
+  const passwordValid = form.password.length >= 6;
   const signupValid = form.firstName.trim() && form.lastName.trim() && /\S+@\S+\.\S+/.test(form.email) && dobValid && passwordValid;
   const loginValid = /\S+@\S+\.\S+/.test(form.email) && form.password.length > 0;
 
@@ -617,18 +661,19 @@ function Auth({ c, onAuthed }) {
 
   return (
     <div style={{ padding: "28px 20px" }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 22 }}>
-        <PizzaMark size={38} />
-        <div style={{ fontSize: 16.5, fontWeight: 700 }}>Willkommen bei Splt</div>
-      </div>
-
       <div style={{ fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace", fontSize: 13, letterSpacing: "0.08em", textTransform: "uppercase", color: c.accentDark, marginBottom: 6 }}>
-        Splt
+        VSPLIT
       </div>
-      <h2 style={{ fontSize: 21, lineHeight: 1.2, margin: "0 0 8px", fontWeight: 800 }}>Ausgeben. Erfassen. Begleichen.</h2>
+      <h2 style={{ fontSize: 21, lineHeight: 1.2, margin: "0 0 8px", fontWeight: 800 }}>WE SPLIT.</h2>
       <p style={{ color: c.textMuted, fontSize: 14, margin: "0 0 20px", lineHeight: 1.5 }}>
         {mode === "signup" ? "Leg ein Konto an, um Projekte zu starten und gemeinsame Ausgaben fair aufzuteilen." : "Schön, dich wiederzusehen."}
       </p>
+
+      {invited && (
+        <div style={{ background: c.bgAlt, border: `1px solid ${c.accentDark}`, borderRadius: 10, padding: "9px 12px", fontSize: 12.5, marginBottom: 18 }}>
+          Du wurdest zu einer Gruppe eingeladen — melde dich an oder registriere dich, um automatisch beizutreten.
+        </div>
+      )}
 
       <div style={{ display: "flex", gap: 8, marginBottom: 20 }}>
         <button
@@ -654,21 +699,21 @@ function Auth({ c, onAuthed }) {
       {mode === "signup" && (
         <>
           <Field c={c} label="Vorname">
-            <input style={inputStyle(c)} value={form.firstName} onChange={(e) => setForm({ ...form, firstName: e.target.value })} placeholder="Vincent" />
+            <input style={inputStyle(c)} value={form.firstName} onChange={(e) => setForm({ ...form, firstName: e.target.value })} placeholder="Thomas" />
           </Field>
           <Field c={c} label="Nachname">
-            <input style={inputStyle(c)} value={form.lastName} onChange={(e) => setForm({ ...form, lastName: e.target.value })} placeholder="Mustermann" />
+            <input style={inputStyle(c)} value={form.lastName} onChange={(e) => setForm({ ...form, lastName: e.target.value })} placeholder="Müller" />
           </Field>
         </>
       )}
 
       <Field c={c} label="Email">
-        <input style={inputStyle(c)} type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} placeholder="vincent@beispiel.de" />
+        <input style={inputStyle(c)} type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} placeholder="thomasmüller@beispiel.de" />
       </Field>
 
       <Field c={c} label="Passwort">
-        <input style={inputStyle(c)} type="password" value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} placeholder="Mindestens 5 Zeichen" />
-        {mode === "signup" && form.password && !passwordValid && <div style={{ fontSize: 11.5, color: c.negative, marginTop: 4 }}>Mindestens 5 Zeichen nötig.</div>}
+        <input style={inputStyle(c)} type="password" value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} placeholder="Mindestens 6 Zeichen" />
+        {mode === "signup" && form.password && !passwordValid && <div style={{ fontSize: 11.5, color: c.negative, marginTop: 4 }}>Mindestens 6 Zeichen nötig.</div>}
       </Field>
 
       {mode === "signup" && (
@@ -875,9 +920,15 @@ function AktivitaetenTab({ c, projects }) {
   );
 }
 
-function AccountTab({ c, me, onLogout }) {
-  if (!me) return null;
+function AccountTab({ c, me, projects, onOpenGroup, onLogout }) {
+  if (!me) {
+    return (
+      <div style={{ padding: "40px 20px", textAlign: "center", color: c.textMuted, fontSize: 13.5 }}>Lädt …</div>
+    );
+  }
   const initials = `${me.firstName?.[0] || ""}${me.lastName?.[0] || ""}`.toUpperCase();
+  const disabledFieldStyle = { ...inputStyle(c), background: c.bgAlt, color: c.textMuted, cursor: "not-allowed" };
+
   return (
     <div style={{ padding: "28px 20px 90px" }}>
       <div style={{ display: "flex", flexDirection: "column", alignItems: "center", marginBottom: 24 }}>
@@ -890,15 +941,41 @@ function AccountTab({ c, me, onLogout }) {
         <div style={{ color: c.textMuted, fontSize: 13 }}>{me.email}</div>
       </div>
 
-      <div style={{ background: c.card, border: `1px solid ${c.border}`, borderRadius: 14, overflow: "hidden", marginBottom: 20 }}>
-        <div style={{ padding: "13px 16px", borderBottom: `1px solid ${c.border}`, display: "flex", justifyContent: "space-between", fontSize: 13.5 }}>
-          <span style={{ color: c.textMuted }}>Geburtsdatum</span>
-          <span style={{ fontWeight: 600 }}>{new Date(me.birthdate).toLocaleDateString("de-DE")}</span>
-        </div>
-        <div style={{ padding: "13px 16px", display: "flex", justifyContent: "space-between", fontSize: 13.5 }}>
-          <span style={{ color: c.textMuted }}>Email</span>
-          <span style={{ fontWeight: 600 }}>{me.email}</span>
-        </div>
+      <div style={{ fontSize: 12, fontWeight: 700, color: c.textMuted, marginBottom: 8, textTransform: "uppercase", letterSpacing: "0.04em" }}>Meine Daten</div>
+      <div style={{ display: "flex", flexDirection: "column", gap: 10, marginBottom: 24 }}>
+        <Field c={c} label="Vorname">
+          <input disabled value={me.firstName} style={disabledFieldStyle} />
+        </Field>
+        <Field c={c} label="Nachname">
+          <input disabled value={me.lastName} style={disabledFieldStyle} />
+        </Field>
+        <Field c={c} label="Email">
+          <input disabled value={me.email} style={disabledFieldStyle} />
+        </Field>
+        <Field c={c} label="Geburtsdatum">
+          <input disabled value={me.birthdate ? new Date(me.birthdate).toLocaleDateString("de-DE") : ""} style={disabledFieldStyle} />
+        </Field>
+      </div>
+
+      <div style={{ fontSize: 12, fontWeight: 700, color: c.textMuted, marginBottom: 8, textTransform: "uppercase", letterSpacing: "0.04em" }}>Meine Gruppen</div>
+      <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 28 }}>
+        {(!projects || projects.length === 0) && <div style={{ fontSize: 12.5, color: c.textMuted }}>Noch in keiner Gruppe.</div>}
+        {(projects || []).map((p) => (
+          <button
+            key={p.id}
+            onClick={() => onOpenGroup(p.id)}
+            style={{ textAlign: "left", background: c.card, border: `1px solid ${c.border}`, borderRadius: 12, padding: "11px 14px", cursor: "pointer", display: "flex", alignItems: "center", gap: 10 }}
+          >
+            {p.photo ? (
+              <img src={p.photo} alt="" style={{ width: 30, height: 30, borderRadius: 8, objectFit: "cover" }} />
+            ) : (
+              <div style={{ width: 30, height: 30, borderRadius: 8, background: c.bgAlt, display: "flex", alignItems: "center", justifyContent: "center" }}>
+                <Users size={14} color={c.textMuted} />
+              </div>
+            )}
+            <span style={{ fontWeight: 600, fontSize: 13.5 }}>{p.name}</span>
+          </button>
+        ))}
       </div>
 
       <button onClick={onLogout} style={{ ...secondaryButton(c), width: "100%", color: c.negative, borderColor: c.negative }}>
@@ -909,11 +986,13 @@ function AccountTab({ c, me, onLogout }) {
 }
 
 // ---------- Project detail (full screen, image header) ----------
-function ProjectDetailScreen({ c, me, project, onBack, onUpdate }) {
+function ProjectDetailScreen({ c, me, project, onBack, onUpdate, onDeleteGroup }) {
   const [tab, setTab] = useState("ausgaben");
   const [showExpenseModal, setShowExpenseModal] = useState(false);
   const [editingExpense, setEditingExpense] = useState(null);
   const [showAddParticipant, setShowAddParticipant] = useState(false);
+  const [showEditGroup, setShowEditGroup] = useState(false);
+  const [groupNameDraft, setGroupNameDraft] = useState(project.name);
   const fileRef = useRef(null);
 
   const balances = useMemo(() => {
@@ -992,6 +1071,22 @@ function ProjectDetailScreen({ c, me, project, onBack, onUpdate }) {
     onUpdate((p) => ({ ...p, participants: [...p.participants, { id: data.id, name: data.display_name }] }));
   }
 
+  async function renameGroup(newName) {
+    if (!newName.trim()) return;
+    const { error } = await supabase.from("groups").update({ name: newName.trim() }).eq("id", project.id);
+    if (error) {
+      alert("Fehler beim Speichern: " + error.message);
+      return;
+    }
+    onUpdate((p) => ({ ...p, name: newName.trim() }));
+    setShowEditGroup(false);
+  }
+
+  async function deleteGroup() {
+    if (!window.confirm(`"${project.name}" wirklich unwiderruflich löschen? Alle Ausgaben gehen dabei verloren.`)) return;
+    await onDeleteGroup(project.id);
+  }
+
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
       {/* Image header ~20% */}
@@ -1024,8 +1119,33 @@ function ProjectDetailScreen({ c, me, project, onBack, onUpdate }) {
           </button>
           <input ref={fileRef} type="file" accept="image/*" style={{ display: "none" }} onChange={handlePhotoChange} />
         </div>
-        <div style={{ color: "#fff", fontWeight: 800, fontSize: 21, textShadow: "0 1px 6px rgba(0,0,0,0.4)" }}>{project.name}</div>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end" }}>
+          <div style={{ color: "#fff", fontWeight: 800, fontSize: 21, textShadow: "0 1px 6px rgba(0,0,0,0.4)" }}>{project.name}</div>
+          <button
+            onClick={() => {
+              setGroupNameDraft(project.name);
+              setShowEditGroup(true);
+            }}
+            style={{ background: "rgba(0,0,0,0.5)", border: "none", borderRadius: 999, width: 32, height: 32, display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", color: "#fff", boxShadow: "0 1px 4px rgba(0,0,0,0.3)", flexShrink: 0 }}
+          >
+            <MoreVertical size={17} />
+          </button>
+        </div>
       </div>
+
+      {showEditGroup && (
+        <Modal c={c} onClose={() => setShowEditGroup(false)} title="Gruppe bearbeiten">
+          <Field c={c} label="Gruppenname">
+            <input style={inputStyle(c)} value={groupNameDraft} onChange={(e) => setGroupNameDraft(e.target.value)} autoFocus />
+          </Field>
+          <button disabled={!groupNameDraft.trim()} onClick={() => renameGroup(groupNameDraft)} style={{ ...primaryButton(c), width: "100%", opacity: groupNameDraft.trim() ? 1 : 0.45, marginBottom: 10 }}>
+            <Check size={16} /> Name speichern
+          </button>
+          <button onClick={deleteGroup} style={{ ...secondaryButton(c), width: "100%", color: c.negative, borderColor: c.negative }}>
+            <Trash2 size={15} /> Gruppe löschen
+          </button>
+        </Modal>
+      )}
 
       {/* Tabs */}
       <div style={{ display: "flex", gap: 4, padding: "12px 20px 0", flexShrink: 0 }}>
@@ -1078,6 +1198,7 @@ function ProjectDetailScreen({ c, me, project, onBack, onUpdate }) {
         <AddExpenseModal
           c={c}
           project={project}
+          me={me}
           initial={editingExpense}
           onClose={() => {
             setShowExpenseModal(false);
@@ -1206,8 +1327,33 @@ function DebtsTab({ c, balances }) {
 
 function TeilnehmerTab({ c, project, showAdd, setShowAdd, onAdd }) {
   const [name, setName] = useState("");
+  const [copied, setCopied] = useState(false);
+  const inviteLink = `${window.location.origin}${window.location.pathname}?join=${project.inviteCode}`;
+
+  function copyLink() {
+    navigator.clipboard.writeText(inviteLink).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    });
+  }
+
   return (
     <div style={{ paddingBottom: 70 }}>
+      <div style={{ background: c.card, border: `1px solid ${c.border}`, borderRadius: 14, padding: 14, marginBottom: 16 }}>
+        <div style={{ fontWeight: 700, fontSize: 13.5, marginBottom: 8, display: "flex", alignItems: "center", gap: 6 }}>
+          <Link2 size={14} /> Freunde einladen
+        </div>
+        <div style={{ fontSize: 11.5, color: c.textMuted, marginBottom: 10, lineHeight: 1.4 }}>
+          Wer diesen Link öffnet, kann sich anmelden und tritt automatisch dieser Gruppe bei.
+        </div>
+        <div style={{ display: "flex", gap: 8 }}>
+          <input readOnly value={inviteLink} onClick={(e) => e.target.select()} style={{ ...inputStyle(c), fontSize: 11.5, flex: 1 }} />
+          <button onClick={copyLink} style={{ ...secondaryButton(c), padding: "0 14px", whiteSpace: "nowrap" }}>
+            {copied ? "Kopiert!" : "Kopieren"}
+          </button>
+        </div>
+      </div>
+
       <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 16 }}>
         {project.participants.map((p) => (
           <div key={p.id} style={{ display: "flex", alignItems: "center", gap: 10, background: c.card, border: `1px solid ${c.border}`, borderRadius: 12, padding: "11px 14px" }}>
@@ -1218,13 +1364,12 @@ function TeilnehmerTab({ c, project, showAdd, setShowAdd, onAdd }) {
           </div>
         ))}
       </div>
-      <div style={{ display: "flex", alignItems: "center", gap: 8, background: c.bgAlt, border: `1px solid ${c.border}`, borderRadius: 10, padding: "9px 12px", fontSize: 12.5, color: c.textMuted }}>
-        <Link2 size={14} />
-        Weitere Personen kannst du per Einladungslink hinzufügen.
-      </div>
 
       {showAdd && (
-        <Modal c={c} onClose={() => setShowAdd(false)} title="Teilnehmer hinzufügen">
+        <Modal c={c} onClose={() => setShowAdd(false)} title="Teilnehmer manuell hinzufügen">
+          <div style={{ fontSize: 12, color: c.textMuted, marginBottom: 14, lineHeight: 1.5 }}>
+            Für Personen ohne eigenes Konto — sie können die App dann nicht selbst nutzen, tauchen aber in der Aufteilung auf.
+          </div>
           <Field c={c} label="Name">
             <input style={inputStyle(c)} value={name} onChange={(e) => setName(e.target.value)} placeholder="Name der Person" autoFocus />
           </Field>
@@ -1246,13 +1391,14 @@ function TeilnehmerTab({ c, project, showAdd, setShowAdd, onAdd }) {
 }
 
 // ---------- Add / edit expense modal ----------
-function AddExpenseModal({ c, project, initial, onClose, onSave }) {
+function AddExpenseModal({ c, project, me, initial, onClose, onSave }) {
   const isEdit = !!initial;
   const [amount, setAmount] = useState(initial ? String(initial.amount).replace(".", ",") : "");
   const [description, setDescription] = useState(initial?.description || "");
   const [category, setCategory] = useState(initial?.category || "sonstiges");
   const [categoryTouched, setCategoryTouched] = useState(isEdit);
-  const [paidBy, setPaidBy] = useState(initial?.paidBy || project.participants[0]?.name || "");
+  const payerOptions = project.participants.some((p) => p.name === me) || !me ? project.participants : [{ id: "me", name: me }, ...project.participants];
+  const [paidBy, setPaidBy] = useState(initial?.paidBy || me || project.participants[0]?.name || "");
   const [splitType, setSplitType] = useState(initial ? (new Set(initial.splits.map((s) => s.amount)).size <= 1 ? "equal" : "custom") : "equal");
   const [shares, setShares] = useState(initial ? Object.fromEntries(initial.splits.map((s) => [s.name, s.amount])) : Object.fromEntries(project.participants.map((p) => [p.name, 1])));
 
@@ -1305,7 +1451,7 @@ function AddExpenseModal({ c, project, initial, onClose, onSave }) {
 
       <Field c={c} label="Bezahlt von">
         <select style={inputStyle(c)} value={paidBy} onChange={(e) => setPaidBy(e.target.value)}>
-          {project.participants.map((p) => (
+          {payerOptions.map((p) => (
             <option key={p.id} value={p.name}>
               {p.name}
             </option>
