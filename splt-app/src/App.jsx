@@ -1,4 +1,5 @@
 import React, { useState, useMemo, useEffect, useRef } from "react";
+import { supabase } from "./supabaseClient";
 import {
   UtensilsCrossed,
   Home,
@@ -359,6 +360,8 @@ export default function App() {
     return () => clearTimeout(t);
   }, []);
 
+  const [session, setSession] = useState(null);
+  const [authChecked, setAuthChecked] = useState(false);
   const [me, setMe] = useState(null);
   const [screen, setScreen] = useState("onboarding");
   const [mainTab, setMainTab] = useState("gruppen");
@@ -368,11 +371,122 @@ export default function App() {
   const activeProject = projects.find((p) => p.id === activeProjectId) || null;
   const myName = me ? `${me.firstName} ${me.lastName}` : "";
 
+  async function loadProfile(userId, email) {
+    const { data, error } = await supabase.from("profiles").select("*").eq("id", userId).single();
+    if (error || !data) return false;
+    setMe({ firstName: data.first_name, lastName: data.last_name, email, birthdate: data.birthdate });
+    return true;
+  }
+
+  async function loadProjects() {
+    const { data: groupsData } = await supabase.from("groups").select("*").order("created_at", { ascending: false });
+    if (!groupsData || groupsData.length === 0) {
+      setProjects([]);
+      return;
+    }
+    const groupIds = groupsData.map((g) => g.id);
+    const [{ data: membersData }, { data: expensesData }] = await Promise.all([
+      supabase.from("group_members").select("*").in("group_id", groupIds),
+      supabase.from("expenses").select("*").in("group_id", groupIds),
+    ]);
+    const expenseIds = (expensesData || []).map((e) => e.id);
+    const { data: splitsData } = expenseIds.length ? await supabase.from("expense_splits").select("*").in("expense_id", expenseIds) : { data: [] };
+
+    const built = groupsData.map((g) => ({
+      id: g.id,
+      name: g.name,
+      photo: g.photo_url,
+      participants: (membersData || []).filter((m) => m.group_id === g.id).map((m) => ({ id: m.id, name: m.display_name })),
+      expenses: (expensesData || [])
+        .filter((e) => e.group_id === g.id)
+        .map((e) => ({
+          id: e.id,
+          amount: Number(e.amount),
+          description: e.description,
+          category: e.category,
+          paidBy: e.paid_by,
+          createdAt: new Date(e.created_at).getTime(),
+          splits: (splitsData || []).filter((s) => s.expense_id === e.id).map((s) => ({ name: s.participant_name, amount: Number(s.amount) })),
+        }))
+        .sort((a, b) => b.createdAt - a.createdAt),
+    }));
+    setProjects(built);
+  }
+
+  useEffect(() => {
+    let active = true;
+    supabase.auth.getSession().then(async ({ data: { session: existingSession } }) => {
+      if (!active) return;
+      if (existingSession) {
+        setSession(existingSession);
+        const ok = await loadProfile(existingSession.user.id, existingSession.user.email);
+        if (ok) {
+          setScreen("main");
+          await loadProjects();
+        }
+      }
+      setAuthChecked(true);
+    });
+    const { data: listener } = supabase.auth.onAuthStateChange((event, newSession) => {
+      setSession(newSession);
+      if (event === "SIGNED_OUT" || !newSession) {
+        setMe(null);
+        setProjects([]);
+        setActiveProjectId(null);
+        setScreen("onboarding");
+      }
+    });
+    return () => {
+      active = false;
+      listener.subscription.unsubscribe();
+    };
+  }, []);
+
+  async function handleAuthed(newSession, profileFromSignup) {
+    setSession(newSession);
+    if (profileFromSignup) {
+      setMe(profileFromSignup);
+    } else {
+      await loadProfile(newSession.user.id, newSession.user.email);
+    }
+    setScreen("main");
+    await loadProjects();
+  }
+
+  async function handleLogout() {
+    await supabase.auth.signOut();
+    setMe(null);
+    setProjects([]);
+    setActiveProjectId(null);
+    setMainTab("gruppen");
+    setScreen("onboarding");
+  }
+
+  async function createGroup(name, participantNames, photo) {
+    const { data: group, error } = await supabase.from("groups").insert({ name, photo_url: photo, created_by: session.user.id }).select().single();
+    if (error) {
+      alert("Fehler beim Erstellen: " + error.message);
+      return;
+    }
+    const memberNames = [myName, ...participantNames.filter((n) => n.trim())];
+    const { data: members, error: mErr } = await supabase
+      .from("group_members")
+      .insert(memberNames.map((n) => ({ group_id: group.id, display_name: n })))
+      .select();
+    if (mErr) {
+      alert("Fehler beim Anlegen der Teilnehmer: " + mErr.message);
+      return;
+    }
+    const newProject = { id: group.id, name: group.name, photo: group.photo_url, participants: members.map((m) => ({ id: m.id, name: m.display_name })), expenses: [] };
+    setProjects((prev) => [newProject, ...prev]);
+    setActiveProjectId(group.id);
+  }
+
   function updateProject(id, fn) {
     setProjects((prev) => prev.map((p) => (p.id === id ? fn(p) : p)));
   }
 
-  if (booting) {
+  if (booting || !authChecked) {
     return (
       <div style={{ minHeight: "100vh", background: palette.light.bg, display: "flex", alignItems: "center", justifyContent: "center", flexDirection: "column", gap: 16 }}>
         <div style={{ animation: "splt-pop 0.6s ease-out" }}>
@@ -396,13 +510,7 @@ export default function App() {
           <>
             <TopBar c={c} dark={dark} setDark={setDark} title="Willkommen" />
             <div style={{ flex: 1, overflowY: "auto" }}>
-              <Onboarding
-                c={c}
-                onDone={(user) => {
-                  setMe(user);
-                  setScreen("main");
-                }}
-              />
+              <Auth c={c} onAuthed={handleAuthed} />
             </div>
           </>
         )}
@@ -417,34 +525,11 @@ export default function App() {
             />
             <div style={{ flex: 1, overflowY: "auto", position: "relative" }}>
               {mainTab === "gruppen" && (
-                <GruppenTab
-                  c={c}
-                  me={me}
-                  projects={projects}
-                  onOpen={(id) => setActiveProjectId(id)}
-                  onCreate={(name, participantNames, photo) => {
-                    const id = uid();
-                    const participants = [{ id: uid(), name: myName }, ...participantNames.filter((n) => n.trim()).map((n) => ({ id: uid(), name: n.trim() }))];
-                    setProjects((prev) => [...prev, { id, name, photo, participants, expenses: [] }]);
-                    setActiveProjectId(id);
-                  }}
-                />
+                <GruppenTab c={c} me={me} projects={projects} onOpen={(id) => setActiveProjectId(id)} onCreate={createGroup} />
               )}
               {mainTab === "freunde" && <FreundeTab c={c} />}
               {mainTab === "aktivitaeten" && <AktivitaetenTab c={c} projects={projects} />}
-              {mainTab === "account" && (
-                <AccountTab
-                  c={c}
-                  me={me}
-                  onLogout={() => {
-                    setMe(null);
-                    setProjects([]);
-                    setActiveProjectId(null);
-                    setMainTab("gruppen");
-                    setScreen("onboarding");
-                  }}
-                />
-              )}
+              {mainTab === "account" && <AccountTab c={c} me={me} onLogout={handleLogout} />}
             </div>
             <BottomNav c={c} active={mainTab} setActive={setMainTab} />
           </>
@@ -458,13 +543,77 @@ export default function App() {
   );
 }
 
-// ---------- Onboarding ----------
-function Onboarding({ c, onDone }) {
-  const [form, setForm] = useState({ firstName: "", lastName: "", email: "" });
+// ---------- Auth (Login / Registrierung) ----------
+function Auth({ c, onAuthed }) {
+  const [mode, setMode] = useState("signup");
+  const [form, setForm] = useState({ firstName: "", lastName: "", email: "", password: "" });
   const [dob, setDob] = useState({ day: "", month: "", year: "" });
+  const [error, setError] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [awaitingConfirm, setAwaitingConfirm] = useState(false);
 
   const dobValid = dob.day && dob.month && dob.year;
-  const valid = form.firstName.trim() && form.lastName.trim() && /\S+@\S+\.\S+/.test(form.email) && dobValid;
+  const passwordValid = form.password.length >= 5;
+  const signupValid = form.firstName.trim() && form.lastName.trim() && /\S+@\S+\.\S+/.test(form.email) && dobValid && passwordValid;
+  const loginValid = /\S+@\S+\.\S+/.test(form.email) && form.password.length > 0;
+
+  async function handleSignup() {
+    setError("");
+    setLoading(true);
+    const { data, error: signErr } = await supabase.auth.signUp({ email: form.email, password: form.password });
+    if (signErr) {
+      setError(signErr.message);
+      setLoading(false);
+      return;
+    }
+    const birthdate = `${dob.year}-${String(dob.month).padStart(2, "0")}-${String(dob.day).padStart(2, "0")}`;
+    if (data.session && data.user) {
+      const { error: profErr } = await supabase.from("profiles").insert({ id: data.user.id, first_name: form.firstName.trim(), last_name: form.lastName.trim(), birthdate });
+      if (profErr) {
+        setError(profErr.message);
+        setLoading(false);
+        return;
+      }
+      await onAuthed(data.session, { firstName: form.firstName.trim(), lastName: form.lastName.trim(), email: form.email, birthdate });
+    } else {
+      setAwaitingConfirm(true);
+    }
+    setLoading(false);
+  }
+
+  async function handleLogin() {
+    setError("");
+    setLoading(true);
+    const { data, error: loginErr } = await supabase.auth.signInWithPassword({ email: form.email, password: form.password });
+    if (loginErr) {
+      setError("Email oder Passwort ist falsch.");
+      setLoading(false);
+      return;
+    }
+    await onAuthed(data.session);
+    setLoading(false);
+  }
+
+  if (awaitingConfirm) {
+    return (
+      <div style={{ padding: "40px 20px", textAlign: "center" }}>
+        <PizzaMark size={54} />
+        <h2 style={{ fontSize: 19, fontWeight: 800, margin: "16px 0 8px" }}>Fast geschafft!</h2>
+        <p style={{ color: c.textMuted, fontSize: 13.5, lineHeight: 1.5 }}>
+          Wir haben eine Bestätigungs-Email an {form.email} geschickt. Bitte bestätige deine Email-Adresse und logge dich danach ein.
+        </p>
+        <button
+          onClick={() => {
+            setAwaitingConfirm(false);
+            setMode("login");
+          }}
+          style={{ ...primaryButton(c), width: "100%", marginTop: 20 }}
+        >
+          Zum Login
+        </button>
+      </div>
+    );
+  }
 
   return (
     <div style={{ padding: "28px 20px" }}>
@@ -476,41 +625,69 @@ function Onboarding({ c, onDone }) {
       <div style={{ fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace", fontSize: 13, letterSpacing: "0.08em", textTransform: "uppercase", color: c.accentDark, marginBottom: 6 }}>
         Splt
       </div>
-      <h2 style={{ fontSize: 21, lineHeight: 1.2, margin: "0 0 8px", fontWeight: 800 }}>
-        Ausgeben. Erfassen. Begleichen.
-      </h2>
-      <p style={{ color: c.textMuted, fontSize: 14, margin: "0 0 26px", lineHeight: 1.5 }}>
-        Leg ein Konto an, um Projekte zu starten und gemeinsame Ausgaben fair aufzuteilen.
+      <h2 style={{ fontSize: 21, lineHeight: 1.2, margin: "0 0 8px", fontWeight: 800 }}>Ausgeben. Erfassen. Begleichen.</h2>
+      <p style={{ color: c.textMuted, fontSize: 14, margin: "0 0 20px", lineHeight: 1.5 }}>
+        {mode === "signup" ? "Leg ein Konto an, um Projekte zu starten und gemeinsame Ausgaben fair aufzuteilen." : "Schön, dich wiederzusehen."}
       </p>
 
-      <Field c={c} label="Vorname">
-        <input style={inputStyle(c)} value={form.firstName} onChange={(e) => setForm({ ...form, firstName: e.target.value })} placeholder="Vincent" />
-      </Field>
-      <Field c={c} label="Nachname">
-        <input style={inputStyle(c)} value={form.lastName} onChange={(e) => setForm({ ...form, lastName: e.target.value })} placeholder="Mustermann" />
-      </Field>
+      <div style={{ display: "flex", gap: 8, marginBottom: 20 }}>
+        <button
+          onClick={() => {
+            setMode("signup");
+            setError("");
+          }}
+          style={{ flex: 1, padding: "9px 8px", borderRadius: 10, border: `1px solid ${mode === "signup" ? "transparent" : c.border}`, background: mode === "signup" ? c.accent : "transparent", color: mode === "signup" ? c.accentText : c.text, fontWeight: 700, fontSize: 13, cursor: "pointer" }}
+        >
+          Neu hier
+        </button>
+        <button
+          onClick={() => {
+            setMode("login");
+            setError("");
+          }}
+          style={{ flex: 1, padding: "9px 8px", borderRadius: 10, border: `1px solid ${mode === "login" ? "transparent" : c.border}`, background: mode === "login" ? c.accent : "transparent", color: mode === "login" ? c.accentText : c.text, fontWeight: 700, fontSize: 13, cursor: "pointer" }}
+        >
+          Ich habe ein Konto
+        </button>
+      </div>
+
+      {mode === "signup" && (
+        <>
+          <Field c={c} label="Vorname">
+            <input style={inputStyle(c)} value={form.firstName} onChange={(e) => setForm({ ...form, firstName: e.target.value })} placeholder="Vincent" />
+          </Field>
+          <Field c={c} label="Nachname">
+            <input style={inputStyle(c)} value={form.lastName} onChange={(e) => setForm({ ...form, lastName: e.target.value })} placeholder="Mustermann" />
+          </Field>
+        </>
+      )}
+
       <Field c={c} label="Email">
         <input style={inputStyle(c)} type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} placeholder="vincent@beispiel.de" />
       </Field>
-      <Field c={c} label="Geburtsdatum">
-        <DOBPicker c={c} day={dob.day} month={dob.month} year={dob.year} onChange={setDob} />
+
+      <Field c={c} label="Passwort">
+        <input style={inputStyle(c)} type="password" value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} placeholder="Mindestens 5 Zeichen" />
+        {mode === "signup" && form.password && !passwordValid && <div style={{ fontSize: 11.5, color: c.negative, marginTop: 4 }}>Mindestens 5 Zeichen nötig.</div>}
       </Field>
 
+      {mode === "signup" && (
+        <Field c={c} label="Geburtsdatum">
+          <DOBPicker c={c} day={dob.day} month={dob.month} year={dob.year} onChange={setDob} />
+        </Field>
+      )}
+
+      {error && (
+        <div style={{ background: c.bgAlt, border: `1px solid ${c.negative}`, color: c.negative, borderRadius: 10, padding: "9px 12px", fontSize: 12.5, marginBottom: 14 }}>{error}</div>
+      )}
+
       <button
-        disabled={!valid}
-        onClick={() =>
-          onDone({
-            firstName: form.firstName,
-            lastName: form.lastName,
-            email: form.email,
-            birthdate: `${dob.year}-${String(dob.month).padStart(2, "0")}-${String(dob.day).padStart(2, "0")}`,
-          })
-        }
-        style={{ ...primaryButton(c), width: "100%", marginTop: 12, opacity: valid ? 1 : 0.45, cursor: valid ? "pointer" : "not-allowed" }}
+        disabled={loading || (mode === "signup" ? !signupValid : !loginValid)}
+        onClick={mode === "signup" ? handleSignup : handleLogin}
+        style={{ ...primaryButton(c), width: "100%", marginTop: 4, opacity: loading || (mode === "signup" ? !signupValid : !loginValid) ? 0.45 : 1, cursor: loading ? "wait" : "pointer" }}
       >
-        Konto erstellen
+        {loading ? "Einen Moment …" : mode === "signup" ? "Konto erstellen" : "Einloggen"}
       </button>
-      <p style={{ fontSize: 11.5, color: c.textMuted, marginTop: 14, lineHeight: 1.5 }}>Prototyp — es wird nichts gespeichert oder verschickt.</p>
     </div>
   );
 }
@@ -751,27 +928,68 @@ function ProjectDetailScreen({ c, me, project, onBack, onUpdate }) {
     return bal;
   }, [project]);
 
-  function deleteExpense(id) {
+  async function deleteExpense(id) {
+    const { error } = await supabase.from("expenses").delete().eq("id", id);
+    if (error) {
+      alert("Fehler beim Löschen: " + error.message);
+      return;
+    }
     onUpdate((p) => ({ ...p, expenses: p.expenses.filter((e) => e.id !== id) }));
   }
-  function saveExpense(expense) {
-    onUpdate((p) => {
-      const exists = p.expenses.some((e) => e.id === expense.id);
-      return { ...p, expenses: exists ? p.expenses.map((e) => (e.id === expense.id ? expense : e)) : [expense, ...p.expenses] };
-    });
+
+  async function saveExpense(expense) {
+    const isEdit = !!expense.id;
+    if (isEdit) {
+      const { error } = await supabase.from("expenses").update({ amount: expense.amount, description: expense.description, category: expense.category, paid_by: expense.paidBy }).eq("id", expense.id);
+      if (error) {
+        alert("Fehler beim Speichern: " + error.message);
+        return;
+      }
+      await supabase.from("expense_splits").delete().eq("expense_id", expense.id);
+      await supabase.from("expense_splits").insert(expense.splits.map((s) => ({ expense_id: expense.id, participant_name: s.name, amount: s.amount })));
+      onUpdate((p) => ({ ...p, expenses: p.expenses.map((e) => (e.id === expense.id ? expense : e)) }));
+    } else {
+      const { data: newExp, error } = await supabase
+        .from("expenses")
+        .insert({ group_id: project.id, amount: expense.amount, description: expense.description, category: expense.category, paid_by: expense.paidBy })
+        .select()
+        .single();
+      if (error) {
+        alert("Fehler beim Speichern: " + error.message);
+        return;
+      }
+      await supabase.from("expense_splits").insert(expense.splits.map((s) => ({ expense_id: newExp.id, participant_name: s.name, amount: s.amount })));
+      const savedExpense = { ...expense, id: newExp.id, createdAt: new Date(newExp.created_at).getTime() };
+      onUpdate((p) => ({ ...p, expenses: [savedExpense, ...p.expenses] }));
+    }
     setShowExpenseModal(false);
     setEditingExpense(null);
   }
-  function handlePhotoChange(e) {
+
+  async function handlePhotoChange(e) {
     const file = e.target.files?.[0];
     if (!file) return;
     const reader = new FileReader();
-    reader.onload = () => onUpdate((p) => ({ ...p, photo: reader.result }));
+    reader.onload = async () => {
+      const dataUrl = reader.result;
+      const { error } = await supabase.from("groups").update({ photo_url: dataUrl }).eq("id", project.id);
+      if (error) {
+        alert("Fehler beim Speichern des Bilds: " + error.message);
+        return;
+      }
+      onUpdate((p) => ({ ...p, photo: dataUrl }));
+    };
     reader.readAsDataURL(file);
   }
-  function addParticipant(name) {
+
+  async function addParticipant(name) {
     if (!name.trim()) return;
-    onUpdate((p) => ({ ...p, participants: [...p.participants, { id: uid(), name: name.trim() }] }));
+    const { data, error } = await supabase.from("group_members").insert({ group_id: project.id, display_name: name.trim() }).select().single();
+    if (error) {
+      alert("Fehler beim Hinzufügen: " + error.message);
+      return;
+    }
+    onUpdate((p) => ({ ...p, participants: [...p.participants, { id: data.id, name: data.display_name }] }));
   }
 
   return (
@@ -1138,7 +1356,7 @@ function AddExpenseModal({ c, project, initial, onClose, onSave }) {
         disabled={!valid}
         onClick={() =>
           onSave({
-            id: initial?.id || uid(),
+            id: initial?.id ?? null,
             amount: amt,
             description: description.trim(),
             category,
