@@ -108,49 +108,14 @@ function fmt(n) {
 
 const MONTHS = ["Januar", "Februar", "März", "April", "Mai", "Juni", "Juli", "August", "September", "Oktober", "November", "Dezember"];
 
-// ---------- Pizza logo: classic salami pizza, one slice pulled out, fully static ----------
-function polar(cx, cy, r, deg) {
-  const rad = ((deg - 90) * Math.PI) / 180;
-  return [cx + r * Math.cos(rad), cy + r * Math.sin(rad)];
-}
-function makeSlicePath(cx, cy, r, startDeg, endDeg) {
-  const [x1, y1] = polar(cx, cy, r, startDeg);
-  const [x2, y2] = polar(cx, cy, r, endDeg);
-  const large = endDeg - startDeg > 180 ? 1 : 0;
-  return `M ${cx} ${cy} L ${x1} ${y1} A ${r} ${r} 0 ${large} 1 ${x2} ${y2} Z`;
-}
-
-function PizzaMark({ c, size = 40 }) {
-  const cx = 50,
-    cy = 50,
-    r = 44;
-  const sliceCount = 8;
-  const separatedIndex = 1;
-
-  const slices = Array.from({ length: sliceCount }, (_, i) => {
-    const startDeg = i * (360 / sliceCount);
-    const endDeg = startDeg + 360 / sliceCount;
-    const midDeg = startDeg + 180 / sliceCount;
-    const isOut = i === separatedIndex;
-    const rad = ((midDeg - 90) * Math.PI) / 180;
-    const dist = isOut ? 13 : 0;
-    const dx = Math.cos(rad) * dist;
-    const dy = Math.sin(rad) * dist;
-    const pep = polar(cx, cy, r * 0.55, midDeg);
-
-    return (
-      <g key={i} style={isOut ? { transform: `translate(${dx}px, ${dy}px)` } : undefined}>
-        <path d={makeSlicePath(cx, cy, r, startDeg, endDeg)} fill={c.accent} stroke="#C9863A" strokeWidth="2.2" strokeLinejoin="round" />
-        <circle cx={pep[0]} cy={pep[1]} r={4.2} fill="#B5432E" />
-        <circle cx={(pep[0] + cx) / 2} cy={(pep[1] + cy) / 2 + 4} r={2.8} fill="#B5432E" opacity="0.85" />
-      </g>
-    );
-  });
-
+// ---------- Pizza logo: uses the uploaded artwork ----------
+function PizzaMark({ size = 40 }) {
   return (
-    <svg width={size} height={size} viewBox="0 0 100 100" aria-label="Splt Logo">
-      {slices}
-    </svg>
+    <img
+      src="/pizza-mark.png"
+      alt="Splt Logo"
+      style={{ width: size, height: size, objectFit: "contain", display: "block" }}
+    />
   );
 }
 
@@ -300,7 +265,7 @@ function TopBar({ c, dark, setDark, title }) {
   return (
     <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "16px 20px 14px", borderBottom: `1px solid ${c.border}`, background: c.bg, position: "sticky", top: 0, zIndex: 5 }}>
       <div style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0 }}>
-        <PizzaMark c={c} size={24} />
+        <PizzaMark size={24} />
         <h1 style={{ fontSize: 19, fontWeight: 700, margin: 0, letterSpacing: "-0.01em", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{title}</h1>
       </div>
       <button
@@ -411,7 +376,7 @@ export default function App() {
     return (
       <div style={{ minHeight: "100vh", background: palette.light.bg, display: "flex", alignItems: "center", justifyContent: "center", flexDirection: "column", gap: 16 }}>
         <div style={{ animation: "splt-pop 0.6s ease-out" }}>
-          <PizzaMark c={palette.light} size={84} />
+          <PizzaMark size={84} />
         </div>
         <div style={{ fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace", fontWeight: 700, letterSpacing: "0.14em", fontSize: 13, color: palette.light.textMuted, textTransform: "uppercase" }}>
           Splt
@@ -504,7 +469,7 @@ function Onboarding({ c, onDone }) {
   return (
     <div style={{ padding: "28px 20px" }}>
       <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 22 }}>
-        <PizzaMark c={c} size={38} />
+        <PizzaMark size={38} />
         <div style={{ fontSize: 16.5, fontWeight: 700 }}>Willkommen bei Splt</div>
       </div>
 
