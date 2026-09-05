@@ -108,6 +108,18 @@ function fmt(n) {
   return n.toLocaleString("de-DE", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + " €";
 }
 
+function computeBalances(project) {
+  const bal = {};
+  project.participants.forEach((p) => (bal[p.name] = 0));
+  project.expenses.forEach((exp) => {
+    bal[exp.paidBy] = (bal[exp.paidBy] || 0) + exp.amount;
+    exp.splits.forEach((s) => {
+      bal[s.name] = (bal[s.name] || 0) - s.amount;
+    });
+  });
+  return bal;
+}
+
 const MONTHS = ["Januar", "Februar", "März", "April", "Mai", "Juni", "Juli", "August", "September", "Oktober", "November", "Dezember"];
 
 // ---------- Pizza logo: uses the uploaded artwork ----------
@@ -374,7 +386,7 @@ export default function App() {
   async function loadProfile(userId, email) {
     const { data, error } = await supabase.from("profiles").select("*").eq("id", userId).single();
     if (error || !data) return null;
-    const profile = { firstName: data.first_name, lastName: data.last_name, email, birthdate: data.birthdate };
+    const profile = { firstName: data.first_name, lastName: data.last_name, email, birthdate: data.birthdate, avatarUrl: data.avatar_url };
     setMe(profile);
     return profile;
   }
@@ -479,6 +491,16 @@ export default function App() {
     }
   }
 
+  async function updateAvatar(dataUrl) {
+    if (!session) return;
+    const { error } = await supabase.from("profiles").update({ avatar_url: dataUrl }).eq("id", session.user.id);
+    if (error) {
+      alert("Fehler beim Speichern des Profilbilds: " + error.message);
+      return;
+    }
+    setMe((prev) => (prev ? { ...prev, avatarUrl: dataUrl } : prev));
+  }
+
   async function handleLogout() {
     await supabase.auth.signOut();
     setMe(null);
@@ -489,6 +511,10 @@ export default function App() {
   }
 
   async function createGroup(name, participantNames, photo) {
+    if (!myName.trim()) {
+      alert("Dein Profil lädt noch — bitte kurz warten und erneut versuchen.");
+      return;
+    }
     const { data: group, error } = await supabase.from("groups").insert({ name, photo_url: photo, created_by: session.user.id }).select().single();
     if (error) {
       alert("Fehler beim Erstellen: " + error.message);
@@ -557,13 +583,14 @@ export default function App() {
               c={c}
               dark={dark}
               setDark={setDark}
-              title={{ gruppen: "Splt", freunde: "Freunde", aktivitaeten: "Aktivitäten", account: "Account" }[mainTab]}
+              title={{ gruppen: "vSplit – We split", freunde: "Freunde", aktivitaeten: "Aktivitäten", account: "Account" }[mainTab]}
+              logoSize={mainTab === "gruppen" ? 40 : 28}
             />
             <div style={{ flex: 1, overflowY: "auto", position: "relative" }}>
               {mainTab === "gruppen" && (
-                <GruppenTab c={c} me={me} projects={projects} onOpen={(id) => setActiveProjectId(id)} onCreate={createGroup} />
+                <GruppenTab c={c} dark={dark} me={me} projects={projects} onOpen={(id) => setActiveProjectId(id)} onCreate={createGroup} />
               )}
-              {mainTab === "freunde" && <FreundeTab c={c} />}
+              {mainTab === "freunde" && <FreundeTab c={c} me={myName} projects={projects} />}
               {mainTab === "aktivitaeten" && <AktivitaetenTab c={c} projects={projects} />}
               {mainTab === "account" && (
                 <AccountTab
@@ -571,6 +598,7 @@ export default function App() {
                   me={me}
                   projects={projects}
                   onOpenGroup={(id) => setActiveProjectId(id)}
+                  onUpdateAvatar={updateAvatar}
                   onLogout={handleLogout}
                 />
               )}
@@ -708,7 +736,7 @@ function Auth({ c, onAuthed, invited }) {
       )}
 
       <Field c={c} label="Email">
-        <input style={inputStyle(c)} type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} placeholder="thomasmüller@beispiel.de" />
+        <input style={inputStyle(c)} type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} placeholder="thomasmueller@beispiel.de" />
       </Field>
 
       <Field c={c} label="Passwort">
@@ -738,7 +766,7 @@ function Auth({ c, onAuthed, invited }) {
 }
 
 // ---------- Gruppen (projects) tab ----------
-function GruppenTab({ c, me, projects, onOpen, onCreate }) {
+function GruppenTab({ c, dark, me, projects, onOpen, onCreate }) {
   const [showModal, setShowModal] = useState(false);
   const [name, setName] = useState("");
   const [participants, setParticipants] = useState([""]);
@@ -755,7 +783,7 @@ function GruppenTab({ c, me, projects, onOpen, onCreate }) {
 
   return (
     <div style={{ padding: "20px 20px 90px" }}>
-      <p style={{ color: c.textMuted, fontSize: 13, margin: "0 0 18px" }}>Hallo {me?.firstName} — hier sind deine gemeinsamen Töpfe.</p>
+      <p style={{ color: c.textMuted, fontSize: 13, margin: "0 0 18px" }}>Hier sind deine Projekte.</p>
 
       {projects.length === 0 && (
         <div style={{ border: `1px dashed ${c.border}`, borderRadius: 14, padding: "30px 18px", textAlign: "center", color: c.textMuted, fontSize: 13.5, marginBottom: 18 }}>
@@ -780,12 +808,12 @@ function GruppenTab({ c, me, projects, onOpen, onCreate }) {
                 </div>
               )}
               <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontWeight: 700, fontSize: 15.5, marginBottom: 4 }}>{p.name}</div>
+                <div style={{ fontWeight: 700, fontSize: 15.5, marginBottom: 4, color: dark ? c.accent : c.text }}>{p.name}</div>
                 <div style={{ fontSize: 12.5, color: c.textMuted, display: "flex", alignItems: "center", gap: 5 }}>
                   <Users size={13} /> {p.participants.length} Teilnehmer
                 </div>
               </div>
-              <div style={{ fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace", fontWeight: 700, fontSize: 15 }}>{fmt(total)}</div>
+              <div style={{ fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace", fontWeight: 700, fontSize: 15, color: dark ? c.accent : c.text }}>{fmt(total)}</div>
             </button>
           );
         })}
@@ -872,11 +900,105 @@ function GruppenTab({ c, me, projects, onOpen, onCreate }) {
   );
 }
 
-function FreundeTab({ c }) {
+function FreundeTab({ c, me, projects }) {
+  const [selectedFriend, setSelectedFriend] = useState(null);
+
+  const friends = useMemo(() => {
+    const totals = {};
+    const breakdown = {};
+    projects.forEach((project) => {
+      if (!project.participants.some((p) => p.name === me)) return;
+      const balances = computeBalances(project);
+      const tx = simplifyDebts(balances);
+      tx.forEach((t) => {
+        if (t.from === me && t.to !== me) {
+          totals[t.to] = (totals[t.to] || 0) + t.amount;
+          (breakdown[t.to] = breakdown[t.to] || []).push({ groupName: project.name, amount: t.amount });
+        } else if (t.to === me && t.from !== me) {
+          totals[t.from] = (totals[t.from] || 0) - t.amount;
+          (breakdown[t.from] = breakdown[t.from] || []).push({ groupName: project.name, amount: -t.amount });
+        }
+      });
+    });
+    return Object.entries(totals)
+      .filter(([, amt]) => Math.abs(amt) > 0.005)
+      .map(([name, amt]) => ({ name, amount: amt, items: breakdown[name] }))
+      .sort((a, b) => Math.abs(b.amount) - Math.abs(a.amount));
+  }, [projects, me]);
+
+  if (selectedFriend) {
+    const friend = friends.find((f) => f.name === selectedFriend);
+    if (!friend) {
+      setSelectedFriend(null);
+      return null;
+    }
+    const isPositive = friend.amount < 0;
+    return (
+      <div style={{ padding: "18px 20px 90px" }}>
+        <button onClick={() => setSelectedFriend(null)} style={{ ...secondaryButton(c), marginBottom: 16, padding: "8px 12px" }}>
+          <ArrowLeft size={15} /> Zurück
+        </button>
+        <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 20 }}>
+          <div style={{ width: 44, height: 44, borderRadius: 999, background: c.accent, color: c.accentText, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 17, fontWeight: 700 }}>
+            {(friend.name.charAt(0) || "?").toUpperCase()}
+          </div>
+          <div>
+            <div style={{ fontWeight: 800, fontSize: 17 }}>{friend.name}</div>
+            <div style={{ fontSize: 13, color: isPositive ? c.positive : c.negative, fontWeight: 700 }}>
+              {isPositive ? "bekommst du zurück" : "schuldest du insgesamt"}: {fmt(Math.abs(friend.amount))}
+            </div>
+          </div>
+        </div>
+
+        <div style={{ fontSize: 12, fontWeight: 700, color: c.textMuted, marginBottom: 8, textTransform: "uppercase", letterSpacing: "0.04em" }}>Aufteilung nach Gruppe</div>
+        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+          {friend.items.map((item, i) => {
+            const itemPositive = item.amount < 0;
+            return (
+              <div key={i} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", background: c.card, border: `1px solid ${c.border}`, borderRadius: 12, padding: "12px 14px" }}>
+                <span style={{ fontWeight: 600, fontSize: 13.5 }}>{item.groupName}</span>
+                <span style={{ fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace", fontWeight: 700, fontSize: 13.5, color: itemPositive ? c.positive : c.negative }}>
+                  {itemPositive ? "+" : "-"}
+                  {fmt(Math.abs(item.amount))}
+                </span>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    );
+  }
+
+  if (friends.length === 0) {
+    return (
+      <div style={{ padding: "40px 24px", textAlign: "center", color: c.textMuted }}>
+        <Users size={30} style={{ marginBottom: 10, opacity: 0.6 }} />
+        <p style={{ fontSize: 13.5, lineHeight: 1.5 }}>Noch keine offenen Schulden mit anderen. Sobald du dir in einer Gruppe Geld schuldest oder geliehen hast, taucht die Person hier auf.</p>
+      </div>
+    );
+  }
+
   return (
-    <div style={{ padding: "40px 24px", textAlign: "center", color: c.textMuted }}>
-      <Users size={30} style={{ marginBottom: 10, opacity: 0.6 }} />
-      <p style={{ fontSize: 13.5, lineHeight: 1.5 }}>Die Freunde-Liste kommt in einer späteren Version — dann kannst du hier direkt mit einzelnen Personen abrechnen, ohne extra ein Projekt anzulegen.</p>
+    <div style={{ padding: "18px 20px 90px", display: "flex", flexDirection: "column", gap: 8 }}>
+      {friends.map((f) => {
+        const isPositive = f.amount < 0;
+        return (
+          <button
+            key={f.name}
+            onClick={() => setSelectedFriend(f.name)}
+            style={{ display: "flex", alignItems: "center", gap: 12, background: c.card, border: `1px solid ${c.border}`, borderRadius: 14, padding: 13, cursor: "pointer", textAlign: "left" }}
+          >
+            <div style={{ width: 38, height: 38, borderRadius: 999, background: c.accent, color: c.accentText, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 15, fontWeight: 700, flexShrink: 0 }}>
+              {(f.name.charAt(0) || "?").toUpperCase()}
+            </div>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontWeight: 700, fontSize: 14.5 }}>{f.name}</div>
+              <div style={{ fontSize: 11.5, color: c.textMuted }}>{isPositive ? "bekommst du zurück" : "du schuldest"}</div>
+            </div>
+            <div style={{ fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace", fontWeight: 700, fontSize: 14.5, color: isPositive ? c.positive : c.negative }}>{fmt(Math.abs(f.amount))}</div>
+          </button>
+        );
+      })}
     </div>
   );
 }
@@ -920,7 +1042,8 @@ function AktivitaetenTab({ c, projects }) {
   );
 }
 
-function AccountTab({ c, me, projects, onOpenGroup, onLogout }) {
+function AccountTab({ c, me, projects, onOpenGroup, onUpdateAvatar, onLogout }) {
+  const fileRef = useRef(null);
   if (!me) {
     return (
       <div style={{ padding: "40px 20px", textAlign: "center", color: c.textMuted, fontSize: 13.5 }}>Lädt …</div>
@@ -929,12 +1052,44 @@ function AccountTab({ c, me, projects, onOpenGroup, onLogout }) {
   const initials = `${me.firstName?.[0] || ""}${me.lastName?.[0] || ""}`.toUpperCase();
   const disabledFieldStyle = { ...inputStyle(c), background: c.bgAlt, color: c.textMuted, cursor: "not-allowed" };
 
+  function handleAvatarFile(e) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => onUpdateAvatar(reader.result);
+    reader.readAsDataURL(file);
+  }
+
   return (
     <div style={{ padding: "28px 20px 90px" }}>
       <div style={{ display: "flex", flexDirection: "column", alignItems: "center", marginBottom: 24 }}>
-        <div style={{ width: 68, height: 68, borderRadius: 999, background: c.accent, color: c.accentText, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 24, fontWeight: 800, marginBottom: 10 }}>
-          {initials}
-        </div>
+        <button
+          onClick={() => fileRef.current?.click()}
+          style={{
+            width: 76,
+            height: 76,
+            borderRadius: 999,
+            background: c.accent,
+            color: c.accentText,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            fontSize: 26,
+            fontWeight: 800,
+            marginBottom: 10,
+            border: "none",
+            cursor: "pointer",
+            position: "relative",
+            overflow: "hidden",
+            padding: 0,
+          }}
+        >
+          {me.avatarUrl ? <img src={me.avatarUrl} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} /> : initials}
+          <div style={{ position: "absolute", bottom: 0, right: 0, width: 24, height: 24, borderRadius: 999, background: c.card, border: `2px solid ${c.bg}`, display: "flex", alignItems: "center", justifyContent: "center" }}>
+            <Camera size={12} color={c.text} />
+          </div>
+        </button>
+        <input ref={fileRef} type="file" accept="image/*" style={{ display: "none" }} onChange={handleAvatarFile} />
         <div style={{ fontWeight: 800, fontSize: 18 }}>
           {me.firstName} {me.lastName}
         </div>
@@ -995,17 +1150,7 @@ function ProjectDetailScreen({ c, me, project, onBack, onUpdate, onDeleteGroup }
   const [groupNameDraft, setGroupNameDraft] = useState(project.name);
   const fileRef = useRef(null);
 
-  const balances = useMemo(() => {
-    const bal = {};
-    project.participants.forEach((p) => (bal[p.name] = 0));
-    project.expenses.forEach((exp) => {
-      bal[exp.paidBy] = (bal[exp.paidBy] || 0) + exp.amount;
-      exp.splits.forEach((s) => {
-        bal[s.name] = (bal[s.name] || 0) - s.amount;
-      });
-    });
-    return bal;
-  }, [project]);
+  const balances = useMemo(() => computeBalances(project), [project]);
 
   async function deleteExpense(id) {
     const { error } = await supabase.from("expenses").delete().eq("id", id);
@@ -1292,7 +1437,7 @@ function DebtsTab({ c, balances }) {
         {entries.map(([name, amt]) => (
           <div key={name} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", background: c.card, border: `1px solid ${c.border}`, borderRadius: 12, padding: "12px 14px" }}>
             <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-              <div style={{ width: 30, height: 30, borderRadius: 999, background: c.bgAlt, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12.5, fontWeight: 700 }}>{name.charAt(0).toUpperCase()}</div>
+              <div style={{ width: 30, height: 30, borderRadius: 999, background: c.accent, color: c.accentText, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12.5, fontWeight: 700 }}>{(name.charAt(0) || "?").toUpperCase()}</div>
               <span style={{ fontWeight: 600, fontSize: 14 }}>{name}</span>
             </div>
             <span style={{ fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace", fontWeight: 700, fontSize: 14, color: amt > 0.005 ? c.positive : amt < -0.005 ? c.negative : c.textMuted }}>
@@ -1358,7 +1503,7 @@ function TeilnehmerTab({ c, project, showAdd, setShowAdd, onAdd }) {
         {project.participants.map((p) => (
           <div key={p.id} style={{ display: "flex", alignItems: "center", gap: 10, background: c.card, border: `1px solid ${c.border}`, borderRadius: 12, padding: "11px 14px" }}>
             <div style={{ width: 32, height: 32, borderRadius: 999, background: c.accent, color: c.accentText, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 13, fontWeight: 700 }}>
-              {p.name.charAt(0).toUpperCase()}
+              {(p.name.charAt(0) || "?").toUpperCase()}
             </div>
             <span style={{ fontWeight: 600, fontSize: 14 }}>{p.name}</span>
           </div>
