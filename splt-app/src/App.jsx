@@ -19,6 +19,8 @@ import {
   Trash2,
   Camera,
   MoreVertical,
+  ScanLine,
+  Lock,
   UserPlus,
   Wallet,
   Activity,
@@ -42,17 +44,17 @@ const palette = {
     positive: "#3A7D5C",
   },
   dark: {
-    bg: "#18160F",
-    bgAlt: "#211E15",
-    card: "#28241A",
-    text: "#F5F2EA",
-    textMuted: "#A39D89",
-    border: "#3A3527",
+    bg: "#000000",
+    bgAlt: "#1C1C1E",
+    card: "#1C1C1E",
+    text: "#FFFFFF",
+    textMuted: "#8E8E93",
+    border: "#38383A",
     accent: "#F5E23C",
     accentDark: "#F8ED6E",
-    accentText: "#211E17",
-    negative: "#E2694E",
-    positive: "#5FB98A",
+    accentText: "#17171A",
+    negative: "#FF453A",
+    positive: "#32D74B",
   },
 };
 
@@ -296,6 +298,7 @@ function BottomNav({ c, active, setActive }) {
   const items = [
     { id: "gruppen", label: "Gruppen", icon: Wallet },
     { id: "freunde", label: "Freunde", icon: Users },
+    { id: "scan", label: "Scan", icon: ScanLine },
     { id: "aktivitaeten", label: "Aktivitäten", icon: Activity },
     { id: "account", label: "Account", icon: User },
   ];
@@ -386,7 +389,7 @@ export default function App() {
   async function loadProfile(userId, email) {
     const { data, error } = await supabase.from("profiles").select("*").eq("id", userId).single();
     if (error || !data) return null;
-    const profile = { firstName: data.first_name, lastName: data.last_name, email, birthdate: data.birthdate, avatarUrl: data.avatar_url };
+    const profile = { firstName: data.first_name, lastName: data.last_name, email, birthdate: data.birthdate, avatarUrl: data.avatar_url, friendCode: data.friend_code };
     setMe(profile);
     return profile;
   }
@@ -432,6 +435,7 @@ export default function App() {
     supabase.auth.getSession().then(async ({ data: { session: existingSession } }) => {
       if (!active) return;
       const codeFromUrl = new URLSearchParams(window.location.search).get("join");
+      const friendCodeFromUrl = new URLSearchParams(window.location.search).get("addfriend");
       if (existingSession) {
         setSession(existingSession);
         const profile = await loadProfile(existingSession.user.id, existingSession.user.email);
@@ -439,8 +443,11 @@ export default function App() {
           setScreen("main");
           if (codeFromUrl) {
             await joinGroupByCode(codeFromUrl, `${profile.firstName} ${profile.lastName}`);
+          } else if (friendCodeFromUrl) {
+            await addFriendByCode(friendCodeFromUrl);
           } else {
             await loadProjects();
+            await loadFriendships();
           }
         }
       }
@@ -461,11 +468,46 @@ export default function App() {
     };
   }, []);
 
+  useEffect(() => {
+    if (session && !me) {
+      loadProfile(session.user.id, session.user.email);
+    }
+  }, [session, me]);
+
   const [pendingInviteCode, setPendingInviteCode] = useState(null);
+  const [pendingFriendCode, setPendingFriendCode] = useState(null);
+  const [friends, setFriends] = useState([]);
   useEffect(() => {
     const code = new URLSearchParams(window.location.search).get("join");
     if (code) setPendingInviteCode(code);
+    const friendCode = new URLSearchParams(window.location.search).get("addfriend");
+    if (friendCode) setPendingFriendCode(friendCode);
   }, []);
+
+  async function loadFriendships() {
+    const { data: session2 } = await supabase.auth.getSession();
+    const uid = session2?.session?.user?.id;
+    if (!uid) return;
+    const { data: rows } = await supabase.from("friendships").select("*").or(`user_a.eq.${uid},user_b.eq.${uid}`);
+    if (!rows || rows.length === 0) {
+      setFriends([]);
+      return;
+    }
+    const otherIds = rows.map((r) => (r.user_a === uid ? r.user_b : r.user_a));
+    const { data: profilesData } = await supabase.from("profiles").select("id, first_name, last_name").in("id", otherIds);
+    setFriends((profilesData || []).map((p) => ({ id: p.id, name: `${p.first_name} ${p.last_name}` })));
+  }
+
+  async function addFriendByCode(code) {
+    const { error } = await supabase.rpc("add_friend_by_code", { code });
+    window.history.replaceState({}, "", window.location.pathname);
+    setPendingFriendCode(null);
+    if (error) {
+      alert("Dieser Freundschafts-Link ist ungültig.");
+    }
+    await loadProjects();
+    await loadFriendships();
+  }
 
   async function joinGroupByCode(code, displayName) {
     const { data, error } = await supabase.rpc("join_group_by_invite", { code, member_name: displayName });
@@ -476,6 +518,7 @@ export default function App() {
     window.history.replaceState({}, "", window.location.pathname);
     setPendingInviteCode(null);
     await loadProjects();
+    await loadFriendships();
     setActiveProjectId(data);
   }
 
@@ -486,8 +529,11 @@ export default function App() {
     setScreen("main");
     if (pendingInviteCode && profile) {
       await joinGroupByCode(pendingInviteCode, `${profile.firstName} ${profile.lastName}`);
+    } else if (pendingFriendCode) {
+      await addFriendByCode(pendingFriendCode);
     } else {
       await loadProjects();
+      await loadFriendships();
     }
   }
 
@@ -511,8 +557,13 @@ export default function App() {
   }
 
   async function createGroup(name, participantNames, photo) {
-    if (!myName.trim()) {
-      alert("Dein Profil lädt noch — bitte kurz warten und erneut versuchen.");
+    let name1 = myName;
+    if (!name1.trim() && session) {
+      const profile = await loadProfile(session.user.id, session.user.email);
+      if (profile) name1 = `${profile.firstName} ${profile.lastName}`;
+    }
+    if (!name1.trim()) {
+      alert("Dein Profil konnte nicht geladen werden. Bitte lade die Seite neu und versuche es erneut.");
       return;
     }
     const { data: group, error } = await supabase.from("groups").insert({ name, photo_url: photo, created_by: session.user.id }).select().single();
@@ -520,7 +571,7 @@ export default function App() {
       alert("Fehler beim Erstellen: " + error.message);
       return;
     }
-    const memberNames = [myName, ...participantNames.filter((n) => n.trim())];
+    const memberNames = [name1, ...participantNames.filter((n) => n.trim())];
     const { data: members, error: mErr } = await supabase
       .from("group_members")
       .insert(memberNames.map((n) => ({ group_id: group.id, display_name: n })))
@@ -555,7 +606,7 @@ export default function App() {
           <PizzaMark size={84} />
         </div>
         <div style={{ fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace", fontWeight: 700, letterSpacing: "0.14em", fontSize: 13, color: palette.light.textMuted, textTransform: "uppercase" }}>
-          Splt
+          VSPLIT
         </div>
         <style>{`
           @keyframes splt-pop { 0% { transform: scale(0.7); opacity: 0; } 60% { transform: scale(1.05); opacity: 1; } 100% { transform: scale(1); opacity: 1; } }
@@ -583,14 +634,15 @@ export default function App() {
               c={c}
               dark={dark}
               setDark={setDark}
-              title={{ gruppen: "vSplit – We split", freunde: "Freunde", aktivitaeten: "Aktivitäten", account: "Account" }[mainTab]}
+              title={{ gruppen: "vSplit – We split", freunde: "Freunde", scan: "Scan", aktivitaeten: "Aktivitäten", account: "Account" }[mainTab]}
               logoSize={mainTab === "gruppen" ? 40 : 28}
             />
             <div style={{ flex: 1, overflowY: "auto", position: "relative" }}>
               {mainTab === "gruppen" && (
                 <GruppenTab c={c} dark={dark} me={me} projects={projects} onOpen={(id) => setActiveProjectId(id)} onCreate={createGroup} />
               )}
-              {mainTab === "freunde" && <FreundeTab c={c} me={myName} projects={projects} />}
+              {mainTab === "freunde" && <FreundeTab c={c} me={myName} projects={projects} explicitFriends={friends} myFriendCode={me?.friendCode} />}
+              {mainTab === "scan" && <ScanTab c={c} />}
               {mainTab === "aktivitaeten" && <AktivitaetenTab c={c} projects={projects} />}
               {mainTab === "account" && (
                 <AccountTab
@@ -689,7 +741,21 @@ function Auth({ c, onAuthed, invited }) {
 
   return (
     <div style={{ padding: "28px 20px" }}>
-      <div style={{ fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace", fontSize: 13, letterSpacing: "0.08em", textTransform: "uppercase", color: c.accentDark, marginBottom: 6 }}>
+      <div
+        style={{
+          display: "inline-block",
+          background: "#17171A",
+          color: c.accent,
+          fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
+          fontSize: 13,
+          fontWeight: 800,
+          letterSpacing: "0.08em",
+          textTransform: "uppercase",
+          padding: "4px 10px",
+          borderRadius: 6,
+          marginBottom: 10,
+        }}
+      >
         VSPLIT
       </div>
       <h2 style={{ fontSize: 21, lineHeight: 1.2, margin: "0 0 8px", fontWeight: 800 }}>WE SPLIT.</h2>
@@ -900,8 +966,28 @@ function GruppenTab({ c, dark, me, projects, onOpen, onCreate }) {
   );
 }
 
-function FreundeTab({ c, me, projects }) {
+function ScanTab({ c }) {
+  return (
+    <div style={{ padding: "60px 24px", textAlign: "center" }}>
+      <div style={{ width: 56, height: 56, borderRadius: 999, background: c.bgAlt, display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 16px" }}>
+        <Lock size={22} color={c.textMuted} />
+      </div>
+      <p style={{ fontSize: 14, fontWeight: 600, color: c.textMuted }}>Scan ist nur für Premium-Nutzer verfügbar.</p>
+    </div>
+  );
+}
+
+function FreundeTab({ c, me, projects, explicitFriends, myFriendCode }) {
   const [selectedFriend, setSelectedFriend] = useState(null);
+  const [copied, setCopied] = useState(false);
+  const friendLink = myFriendCode ? `${window.location.origin}${window.location.pathname}?addfriend=${myFriendCode}` : "";
+
+  function copyLink() {
+    navigator.clipboard.writeText(friendLink).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    });
+  }
 
   const friends = useMemo(() => {
     const totals = {};
@@ -920,11 +1006,35 @@ function FreundeTab({ c, me, projects }) {
         }
       });
     });
-    return Object.entries(totals)
+    const list = Object.entries(totals)
       .filter(([, amt]) => Math.abs(amt) > 0.005)
-      .map(([name, amt]) => ({ name, amount: amt, items: breakdown[name] }))
-      .sort((a, b) => Math.abs(b.amount) - Math.abs(a.amount));
-  }, [projects, me]);
+      .map(([name, amt]) => ({ name, amount: amt, items: breakdown[name] || [] }));
+
+    (explicitFriends || []).forEach((f) => {
+      if (!list.some((l) => l.name === f.name)) {
+        list.push({ name: f.name, amount: 0, items: [] });
+      }
+    });
+
+    return list.sort((a, b) => Math.abs(b.amount) - Math.abs(a.amount));
+  }, [projects, me, explicitFriends]);
+
+  const inviteBox = (
+    <div style={{ background: c.card, border: `1px solid ${c.border}`, borderRadius: 14, padding: 14, marginBottom: 16 }}>
+      <div style={{ fontWeight: 700, fontSize: 13.5, marginBottom: 8, display: "flex", alignItems: "center", gap: 6 }}>
+        <Link2 size={14} /> Freund hinzufügen
+      </div>
+      <div style={{ fontSize: 11.5, color: c.textMuted, marginBottom: 10, lineHeight: 1.4 }}>
+        Wer diesen Link öffnet und sich anmeldet, taucht danach automatisch hier als Freund auf.
+      </div>
+      <div style={{ display: "flex", gap: 8 }}>
+        <input readOnly value={friendLink} onClick={(e) => e.target.select()} style={{ ...inputStyle(c), fontSize: 11.5, flex: 1 }} />
+        <button onClick={copyLink} style={{ ...secondaryButton(c), padding: "0 14px", whiteSpace: "nowrap" }}>
+          {copied ? "Kopiert!" : "Kopieren"}
+        </button>
+      </div>
+    </div>
+  );
 
   if (selectedFriend) {
     const friend = friends.find((f) => f.name === selectedFriend);
@@ -933,6 +1043,7 @@ function FreundeTab({ c, me, projects }) {
       return null;
     }
     const isPositive = friend.amount < 0;
+    const isSettled = Math.abs(friend.amount) < 0.005;
     return (
       <div style={{ padding: "18px 20px 90px" }}>
         <button onClick={() => setSelectedFriend(null)} style={{ ...secondaryButton(c), marginBottom: 16, padding: "8px 12px" }}>
@@ -944,61 +1055,69 @@ function FreundeTab({ c, me, projects }) {
           </div>
           <div>
             <div style={{ fontWeight: 800, fontSize: 17 }}>{friend.name}</div>
-            <div style={{ fontSize: 13, color: isPositive ? c.positive : c.negative, fontWeight: 700 }}>
-              {isPositive ? "bekommst du zurück" : "schuldest du insgesamt"}: {fmt(Math.abs(friend.amount))}
+            <div style={{ fontSize: 13, color: isSettled ? c.textMuted : isPositive ? c.positive : c.negative, fontWeight: 700 }}>
+              {isSettled ? "Keine offenen Schulden" : `${isPositive ? "bekommst du zurück" : "schuldest du insgesamt"}: ${fmt(Math.abs(friend.amount))}`}
             </div>
           </div>
         </div>
 
-        <div style={{ fontSize: 12, fontWeight: 700, color: c.textMuted, marginBottom: 8, textTransform: "uppercase", letterSpacing: "0.04em" }}>Aufteilung nach Gruppe</div>
-        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-          {friend.items.map((item, i) => {
-            const itemPositive = item.amount < 0;
-            return (
-              <div key={i} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", background: c.card, border: `1px solid ${c.border}`, borderRadius: 12, padding: "12px 14px" }}>
-                <span style={{ fontWeight: 600, fontSize: 13.5 }}>{item.groupName}</span>
-                <span style={{ fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace", fontWeight: 700, fontSize: 13.5, color: itemPositive ? c.positive : c.negative }}>
-                  {itemPositive ? "+" : "-"}
-                  {fmt(Math.abs(item.amount))}
-                </span>
-              </div>
-            );
-          })}
-        </div>
-      </div>
-    );
-  }
-
-  if (friends.length === 0) {
-    return (
-      <div style={{ padding: "40px 24px", textAlign: "center", color: c.textMuted }}>
-        <Users size={30} style={{ marginBottom: 10, opacity: 0.6 }} />
-        <p style={{ fontSize: 13.5, lineHeight: 1.5 }}>Noch keine offenen Schulden mit anderen. Sobald du dir in einer Gruppe Geld schuldest oder geliehen hast, taucht die Person hier auf.</p>
+        {friend.items.length > 0 && (
+          <>
+            <div style={{ fontSize: 12, fontWeight: 700, color: c.textMuted, marginBottom: 8, textTransform: "uppercase", letterSpacing: "0.04em" }}>Aufteilung nach Gruppe</div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              {friend.items.map((item, i) => {
+                const itemPositive = item.amount < 0;
+                return (
+                  <div key={i} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", background: c.card, border: `1px solid ${c.border}`, borderRadius: 12, padding: "12px 14px" }}>
+                    <span style={{ fontWeight: 600, fontSize: 13.5 }}>{item.groupName}</span>
+                    <span style={{ fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace", fontWeight: 700, fontSize: 13.5, color: itemPositive ? c.positive : c.negative }}>
+                      {itemPositive ? "+" : "-"}
+                      {fmt(Math.abs(item.amount))}
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+          </>
+        )}
       </div>
     );
   }
 
   return (
-    <div style={{ padding: "18px 20px 90px", display: "flex", flexDirection: "column", gap: 8 }}>
-      {friends.map((f) => {
-        const isPositive = f.amount < 0;
-        return (
-          <button
-            key={f.name}
-            onClick={() => setSelectedFriend(f.name)}
-            style={{ display: "flex", alignItems: "center", gap: 12, background: c.card, border: `1px solid ${c.border}`, borderRadius: 14, padding: 13, cursor: "pointer", textAlign: "left" }}
-          >
-            <div style={{ width: 38, height: 38, borderRadius: 999, background: c.accent, color: c.accentText, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 15, fontWeight: 700, flexShrink: 0 }}>
-              {(f.name.charAt(0) || "?").toUpperCase()}
-            </div>
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <div style={{ fontWeight: 700, fontSize: 14.5 }}>{f.name}</div>
-              <div style={{ fontSize: 11.5, color: c.textMuted }}>{isPositive ? "bekommst du zurück" : "du schuldest"}</div>
-            </div>
-            <div style={{ fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace", fontWeight: 700, fontSize: 14.5, color: isPositive ? c.positive : c.negative }}>{fmt(Math.abs(f.amount))}</div>
-          </button>
-        );
-      })}
+    <div style={{ padding: "18px 20px 90px" }}>
+      {inviteBox}
+      {friends.length === 0 ? (
+        <div style={{ padding: "20px 4px", textAlign: "center", color: c.textMuted }}>
+          <Users size={30} style={{ marginBottom: 10, opacity: 0.6 }} />
+          <p style={{ fontSize: 13.5, lineHeight: 1.5 }}>Noch keine Freunde. Teile deinen Link oder trag gemeinsame Ausgaben in einer Gruppe ein.</p>
+        </div>
+      ) : (
+        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+          {friends.map((f) => {
+            const isPositive = f.amount < 0;
+            const isSettled = Math.abs(f.amount) < 0.005;
+            return (
+              <button
+                key={f.name}
+                onClick={() => setSelectedFriend(f.name)}
+                style={{ display: "flex", alignItems: "center", gap: 12, background: c.card, border: `1px solid ${c.border}`, borderRadius: 14, padding: 13, cursor: "pointer", textAlign: "left" }}
+              >
+                <div style={{ width: 38, height: 38, borderRadius: 999, background: c.accent, color: c.accentText, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 15, fontWeight: 700, flexShrink: 0 }}>
+                  {(f.name.charAt(0) || "?").toUpperCase()}
+                </div>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontWeight: 700, fontSize: 14.5 }}>{f.name}</div>
+                  <div style={{ fontSize: 11.5, color: c.textMuted }}>{isSettled ? "Keine offenen Schulden" : isPositive ? "bekommst du zurück" : "du schuldest"}</div>
+                </div>
+                {!isSettled && (
+                  <div style={{ fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace", fontWeight: 700, fontSize: 14.5, color: isPositive ? c.positive : c.negative }}>{fmt(Math.abs(f.amount))}</div>
+                )}
+              </button>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }
