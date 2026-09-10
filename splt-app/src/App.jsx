@@ -615,6 +615,18 @@ export default function App() {
     );
   }
 
+  const profileIncomplete = me && (!me.firstName?.trim() || !me.lastName?.trim());
+
+  async function completeProfile(firstName, lastName) {
+    if (!session) return;
+    const { error } = await supabase.from("profiles").update({ first_name: firstName, last_name: lastName }).eq("id", session.user.id);
+    if (error) {
+      alert("Fehler beim Speichern: " + error.message);
+      return;
+    }
+    setMe((prev) => (prev ? { ...prev, firstName, lastName } : prev));
+  }
+
   return (
     <div style={{ minHeight: "100vh", background: c.bg, color: c.text, fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif", display: "flex", justifyContent: "center", transition: "background 0.25s, color 0.25s" }}>
       <div style={{ width: "100%", maxWidth: 430, height: "100vh", background: c.bg, display: "flex", flexDirection: "column", position: "relative", boxShadow: "0 0 40px rgba(0,0,0,0.08)", overflow: "hidden" }}>
@@ -628,7 +640,16 @@ export default function App() {
           </>
         )}
 
-        {screen === "main" && !activeProject && (
+        {screen === "main" && profileIncomplete && (
+          <>
+            <TopBar c={c} dark={dark} setDark={setDark} title="Profil vervollständigen" logoSize={28} />
+            <div style={{ flex: 1, overflowY: "auto" }}>
+              <CompleteProfile c={c} me={me} onSave={completeProfile} />
+            </div>
+          </>
+        )}
+
+        {screen === "main" && !profileIncomplete && !activeProject && (
           <>
             <TopBar
               c={c}
@@ -668,6 +689,38 @@ export default function App() {
 }
 
 // ---------- Auth (Login / Registrierung) ----------
+// ---------- Repair screen for accounts missing a name (from earlier signup bugs) ----------
+function CompleteProfile({ c, me, onSave }) {
+  const [firstName, setFirstName] = useState(me.firstName || "");
+  const [lastName, setLastName] = useState(me.lastName || "");
+  const valid = firstName.trim() && lastName.trim();
+
+  return (
+    <div style={{ padding: "28px 20px" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 22 }}>
+        <PizzaMark size={38} />
+        <div style={{ fontSize: 16.5, fontWeight: 700 }}>Fast geschafft</div>
+      </div>
+      <p style={{ color: c.textMuted, fontSize: 14, margin: "0 0 24px", lineHeight: 1.5 }}>
+        Bei deinem Konto fehlt noch dein Name — das kommt manchmal bei sehr frühen Testkonten vor. Trag ihn einmal nach, danach ist alles wie gewohnt nutzbar.
+      </p>
+      <Field c={c} label="Vorname">
+        <input style={inputStyle(c)} value={firstName} onChange={(e) => setFirstName(e.target.value)} placeholder="Vorname" autoFocus />
+      </Field>
+      <Field c={c} label="Nachname">
+        <input style={inputStyle(c)} value={lastName} onChange={(e) => setLastName(e.target.value)} placeholder="Nachname" />
+      </Field>
+      <button
+        disabled={!valid}
+        onClick={() => onSave(firstName.trim(), lastName.trim())}
+        style={{ ...primaryButton(c), width: "100%", marginTop: 4, opacity: valid ? 1 : 0.45 }}
+      >
+        <Check size={16} /> Speichern
+      </button>
+    </div>
+  );
+}
+
 function Auth({ c, onAuthed, invited }) {
   const [mode, setMode] = useState("signup");
   const [form, setForm] = useState({ firstName: "", lastName: "", email: "", password: "" });
