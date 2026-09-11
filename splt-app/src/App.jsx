@@ -277,7 +277,6 @@ function Modal({ c, onClose, title, children }) {
   );
 }
 
-function TopBar({ c, dark, setDark, title, logoSize = 24 }) {
   return (
     <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "16px 20px 14px", borderBottom: `1px solid ${c.border}`, background: c.bg, position: "sticky", top: 0, zIndex: 5 }}>
       <div style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0 }}>
