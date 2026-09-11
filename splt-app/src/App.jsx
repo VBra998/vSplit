@@ -3,6 +3,8 @@ import { supabase } from "./supabaseClient";
 import BottomNav from "./components/BottomNav";
 import TopBar from "./components/TopBar";
 import PizzaMark from "./components/PizzaMark";
+import FabButton from "./components/FabButton";
+import Modal from "./components/Modal";
 import {
   UtensilsCrossed,
   Home,
@@ -252,53 +254,6 @@ function iconButton(c) {
     cursor: "pointer",
     color: c.text,
   };
-}
-
-function Modal({ c, onClose, title, children }) {
-  return (
-    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.45)", display: "flex", alignItems: "flex-end", justifyContent: "center", zIndex: 50 }} onClick={onClose}>
-      <div onClick={(e) => e.stopPropagation()} style={{ background: c.bg, width: "100%", maxWidth: 430, borderRadius: "20px 20px 0 0", padding: "20px 20px 26px", maxHeight: "85vh", overflowY: "auto" }}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
-          <h3 style={{ margin: 0, fontSize: 17, fontWeight: 800 }}>{title}</h3>
-          <button onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", color: c.textMuted }}>
-            <X size={20} />
-          </button>
-        </div>
-        {children}
-      </div>
-    </div>
-  );
-}
-
-function FabButton({ c, onClick, label }) {
-  return (
-    <button
-      onClick={onClick}
-      aria-label={label}
-      style={{
-        position: "absolute",
-        right: 18,
-        bottom: 84,
-        padding: "12px 18px",
-        borderRadius: 999,
-        background: c.accent,
-        color: c.accentText,
-        border: "none",
-        display: "flex",
-        alignItems: "center",
-        gap: 7,
-        boxShadow: "0 6px 16px rgba(0,0,0,0.25)",
-        cursor: "pointer",
-        zIndex: 15,
-        fontSize: 13.5,
-        fontWeight: 700,
-        whiteSpace: "nowrap",
-      }}
-    >
-      <Plus size={16} strokeWidth={2.8} />
-      {label}
-    </button>
-  );
 }
 
 // ---------- App ----------
