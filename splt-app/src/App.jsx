@@ -1,6 +1,8 @@
 import React, { useState, useMemo, useEffect, useRef } from "react";
 import { supabase } from "./supabaseClient";
 import BottomNav from "./components/BottomNav";
+import TopBar from "./components/TopBar";
+import PizzaMark from "./components/PizzaMark";
 import {
   UtensilsCrossed,
   Home,
