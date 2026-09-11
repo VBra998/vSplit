@@ -1,5 +1,6 @@
 import React, { useState, useMemo, useEffect, useRef } from "react";
 import { supabase } from "./supabaseClient";
+import BottomNav from "./components/BottomNav";
 import {
   UtensilsCrossed,
   Home,
