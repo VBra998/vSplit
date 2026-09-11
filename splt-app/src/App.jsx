@@ -126,15 +126,6 @@ function computeBalances(project) {
 const MONTHS = ["Januar", "Februar", "März", "April", "Mai", "Juni", "Juli", "August", "September", "Oktober", "November", "Dezember"];
 
 // ---------- Pizza logo: uses the uploaded artwork ----------
-function PizzaMark({ size = 40 }) {
-  return (
-    <img
-      src="/pizza-mark.png"
-      alt="Splt Logo"
-      style={{ width: size, height: size, objectFit: "contain", display: "block" }}
-    />
-  );
-}
 
 // ---------- Birthdate: 3-wheel picker ----------
 function DOBPicker({ c, day, month, year, onChange }) {
