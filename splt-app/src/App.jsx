@@ -295,6 +295,7 @@ function TopBar({ c, dark, setDark, title, logoSize = 24 }) {
   );
 }
 
+function FabButton({ c, onClick, label }) {
   return (
     <button
       onClick={onClick}
