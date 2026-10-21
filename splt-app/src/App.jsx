@@ -320,12 +320,14 @@ export default function App() {
     ]);
     const expenseIds = (expensesData || []).map((e) => e.id);
     const { data: splitsData } = expenseIds.length ? await supabase.from("expense_splits").select("*").in("expense_id", expenseIds) : { data: [] };
+        const { data: settlementsData } = await supabase.from("settlements").select("*").in("group_id", groupIds).order("created_at", { ascending: false });
 
     const built = groupsData.map((g) => ({
       id: g.id,
       name: g.name,
       photo: g.photo_url,
       inviteCode: g.invite_code,
+      settlements: (settlementsData || []).filter((s) => s.group_id === g.id),
       participants: (membersData || []).filter((m) => m.group_id === g.id).map((m) => ({ id: m.id, name: m.display_name })),
       expenses: (expensesData || [])
         .filter((e) => e.group_id === g.id)
@@ -1301,6 +1303,27 @@ function ProjectDetailScreen({ c, me, project, onBack, onUpdate, onDeleteGroup }
     onUpdate((p) => ({ ...p, participants: [...p.participants, { id: data.id, name: data.display_name }] }));
   }
 
+    async function saveSettlement(s) {
+    const { data, error } = await supabase
+      .from("settlements")
+      .insert({ group_id: project.id, from_name: s.from_name, to_name: s.to_name, amount: s.amount, note: s.note, created_by: (await supabase.auth.getUser()).data.user?.id })
+      .select()
+      .single();
+    if (error) {
+      alert("Fehler beim Speichern: " + error.message);
+      return;
+    }
+    onUpdate((p) => ({ ...p, settlements: [data, ...(p.settlements || [])] }));
+  }
+
+  async function deleteSettlement(id) {
+    const { error } = await supabase.from("settlements").delete().eq("id", id);
+    if (error) {
+      alert("Fehler beim Löschen: " + error.message);
+      return;
+    }
+    onUpdate((p) => ({ ...p, settlements: (p.settlements || []).filter((x) => x.id !== id) }));
+  }
   async function renameGroup(newName) {
     if (!newName.trim()) return;
     const { error } = await supabase.from("groups").update({ name: newName.trim() }).eq("id", project.id);
