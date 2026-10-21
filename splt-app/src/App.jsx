@@ -4,6 +4,7 @@ import BottomNav from "./components/BottomNav";
 import TopBar from "./components/TopBar";
 import PizzaMark from "./components/PizzaMark";
 import FabButton from "./components/FabButton";
+import SettlementsTab from "./components/SettlementsTab";
 import {
   UtensilsCrossed,
   Home,
