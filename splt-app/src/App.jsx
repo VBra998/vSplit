@@ -124,6 +124,11 @@ function computeBalances(project) {
       bal[s.name] = (bal[s.name] || 0) - s.amount;
     });
   });
+    (project.settlements || []).forEach((s) => {
+    const amt = Number(s.amount);
+    bal[s.from_name] = (bal[s.from_name] || 0) + amt;
+    bal[s.to_name] = (bal[s.to_name] || 0) - amt;
+  });
   return bal;
 }
 
