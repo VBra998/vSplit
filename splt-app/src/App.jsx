@@ -1402,10 +1402,11 @@ function ProjectDetailScreen({ c, me, project, onBack, onUpdate, onDeleteGroup }
 
       {/* Tabs */}
       <div style={{ display: "flex", gap: 4, padding: "12px 20px 0", flexShrink: 0 }}>
-        {[
+                {[
           { id: "ausgaben", label: "Ausgaben" },
           { id: "schulden", label: "Schuldenübersicht" },
           { id: "teilnehmer", label: "Teilnehmer" },
+          { id: "zahlungen", label: "Zahlungen" },
         ].map((t) => (
           <button
             key={t.id}
@@ -1428,12 +1429,12 @@ function ProjectDetailScreen({ c, me, project, onBack, onUpdate, onDeleteGroup }
       </div>
 
       <div style={{ flex: 1, overflowY: "auto", position: "relative", padding: "16px 20px 20px" }}>
-        {tab === "ausgaben" && (
+                {tab === "ausgaben" && (
           <ExpensesTab c={c} me={me} project={project} myBalance={balances[me] || 0} onEdit={(exp) => { setEditingExpense(exp); setShowExpenseModal(true); }} onDelete={deleteExpense} />
         )}
         {tab === "schulden" && <DebtsTab c={c} balances={balances} />}
         {tab === "teilnehmer" && <TeilnehmerTab c={c} project={project} showAdd={showAddParticipant} setShowAdd={setShowAddParticipant} onAdd={addParticipant} />}
-
+        {tab === "zahlungen" && <SettlementsTab c={c} project={project} onSave={saveSettlement} onDelete={deleteSettlement} />}
         {tab === "ausgaben" && (
           <FabButton
             c={c}
