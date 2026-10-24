@@ -1406,7 +1406,6 @@ function ProjectDetailScreen({ c, me, project, onBack, onUpdate, onDeleteGroup }
           { id: "ausgaben", label: "Ausgaben" },
           { id: "schulden", label: "Schuldenübersicht" },
           { id: "teilnehmer", label: "Teilnehmer" },
-          { id: "zahlungen", label: "Zahlungen" },
         ].map((t) => (
           <button
             key={t.id}
@@ -1434,7 +1433,6 @@ function ProjectDetailScreen({ c, me, project, onBack, onUpdate, onDeleteGroup }
         )}
         {tab === "schulden" && <SettlementsTab c={c} project={project} balances={balances} onSave={saveSettlement} onDelete={deleteSettlement} />}
         {tab === "teilnehmer" && <TeilnehmerTab c={c} project={project} showAdd={showAddParticipant} setShowAdd={setShowAddParticipant} onAdd={addParticipant} />}
-        {tab === "zahlungen" && <SettlementsTab c={c} project={project} onSave={saveSettlement} onDelete={deleteSettlement} />}
         {tab === "ausgaben" && (
           <FabButton
             c={c}
