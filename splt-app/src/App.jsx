@@ -1432,7 +1432,7 @@ function ProjectDetailScreen({ c, me, project, onBack, onUpdate, onDeleteGroup }
                 {tab === "ausgaben" && (
           <ExpensesTab c={c} me={me} project={project} myBalance={balances[me] || 0} onEdit={(exp) => { setEditingExpense(exp); setShowExpenseModal(true); }} onDelete={deleteExpense} />
         )}
-        {tab === "schulden" && <DebtsTab c={c} balances={balances} />}
+        {tab === "schulden" && <SettlementsTab c={c} project={project} balances={balances} onSave={saveSettlement} onDelete={deleteSettlement} />}
         {tab === "teilnehmer" && <TeilnehmerTab c={c} project={project} showAdd={showAddParticipant} setShowAdd={setShowAddParticipant} onAdd={addParticipant} />}
         {tab === "zahlungen" && <SettlementsTab c={c} project={project} onSave={saveSettlement} onDelete={deleteSettlement} />}
         {tab === "ausgaben" && (
