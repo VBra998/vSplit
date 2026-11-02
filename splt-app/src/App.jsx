@@ -399,18 +399,13 @@ export default function App() {
     if (friendCode) setPendingFriendCode(friendCode);
   }, []);
 
-  async function loadFriendships() {
-    const { data: session2 } = await supabase.auth.getSession();
-    const uid = session2?.session?.user?.id;
-    if (!uid) return;
-    const { data: rows } = await supabase.from("friendships").select("*").or(`user_a.eq.${uid},user_b.eq.${uid}`);
-    if (!rows || rows.length === 0) {
+    async function loadFriendships() {
+    const { data, error } = await supabase.rpc("get_my_friends");
+    if (error) {
       setFriends([]);
       return;
     }
-    const otherIds = rows.map((r) => (r.user_a === uid ? r.user_b : r.user_a));
-    const { data: profilesData } = await supabase.from("profiles").select("id, first_name, last_name").in("id", otherIds);
-    setFriends((profilesData || []).map((p) => ({ id: p.id, name: `${p.first_name} ${p.last_name}` })));
+    setFriends((data || []).map((p) => ({ id: p.id, name: `${p.first_name} ${p.last_name}`, email: p.email })));
   }
 
   async function addFriendByCode(code) {
