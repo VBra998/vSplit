@@ -481,10 +481,17 @@ export default function App() {
       alert("Fehler beim Erstellen: " + error.message);
       return;
     }
-    const memberNames = [name1, ...participantNames.filter((n) => n.trim())];
+        const rows = [{ display_name: name1, user_id: session.user.id }];
+    (participantNames || []).forEach((p) => {
+      if (typeof p === "string") {
+        if (p.trim()) rows.push({ display_name: p.trim(), user_id: null });
+      } else if (p && p.name && p.name.trim()) {
+        rows.push({ display_name: p.name.trim(), user_id: p.userId || null });
+      }
+    });
     const { data: members, error: mErr } = await supabase
       .from("group_members")
-      .insert(memberNames.map((n) => ({ group_id: group.id, display_name: n })))
+      .insert(rows.map((r) => ({ group_id: group.id, display_name: r.display_name, user_id: r.user_id })))
       .select();
     if (mErr) {
       alert("Fehler beim Anlegen der Teilnehmer: " + mErr.message);
