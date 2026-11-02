@@ -5,6 +5,7 @@ import TopBar from "./components/TopBar";
 import PizzaMark from "./components/PizzaMark";
 import FabButton from "./components/FabButton";
 import SettlementsTab from "./components/SettlementsTab";
+import FriendPicker from "./components/FriendPicker";
 import {
   UtensilsCrossed,
   Home,
@@ -577,7 +578,7 @@ export default function App() {
             />
             <div style={{ flex: 1, overflowY: "auto", position: "relative" }}>
               {mainTab === "gruppen" && (
-                <GruppenTab c={c} dark={dark} me={me} projects={projects} onOpen={(id) => setActiveProjectId(id)} onCreate={createGroup} />
+                <GruppenTab c={c} dark={dark} me={me} projects={projects} onOpen={(id) => setActiveProjectId(id)} onCreate={createGroup} friends={friends} />
               )}
               {mainTab === "freunde" && <FreundeTab c={c} me={myName} projects={projects} explicitFriends={friends} myFriendCode={me?.friendCode} />}
               {mainTab === "scan" && <ScanTab c={c} />}
@@ -802,10 +803,10 @@ function Auth({ c, onAuthed, invited }) {
 }
 
 // ---------- Gruppen (projects) tab ----------
-function GruppenTab({ c, dark, me, projects, onOpen, onCreate }) {
+function GruppenTab({ c, dark, me, projects, onOpen, onCreate, friends }) {
   const [showModal, setShowModal] = useState(false);
   const [name, setName] = useState("");
-  const [participants, setParticipants] = useState([""]);
+  const [participants, setParticipants] = useState([]);
   const [photo, setPhoto] = useState(null);
   const fileRef = useRef(null);
 
@@ -893,25 +894,9 @@ function GruppenTab({ c, dark, me, projects, onOpen, onCreate }) {
           <Field c={c} label="Projektname">
             <input style={inputStyle(c)} value={name} onChange={(e) => setName(e.target.value)} placeholder="z. B. WG Küche" autoFocus />
           </Field>
-          <Field c={c} label="Teilnehmer (du bist automatisch dabei)">
-            {participants.map((p, i) => (
-              <input
-                key={i}
-                style={{ ...inputStyle(c), marginBottom: 8 }}
-                value={p}
-                onChange={(e) => {
-                  const copy = [...participants];
-                  copy[i] = e.target.value;
-                  setParticipants(copy);
-                }}
-                placeholder={`Teilnehmer ${i + 1}`}
-              />
-            ))}
-            <button onClick={() => setParticipants([...participants, ""])} style={{ ...secondaryButton(c), width: "100%", marginTop: 2 }}>
-              <Plus size={14} /> weitere Person
-            </button>
+                    <Field c={c} label="Teilnehmer (du bist automatisch dabei)">
+            <FriendPicker c={c} friends={friends} value={participants} onChange={setParticipants} />
           </Field>
-
           <div style={{ display: "flex", alignItems: "center", gap: 8, background: c.bgAlt, border: `1px solid ${c.border}`, borderRadius: 10, padding: "9px 12px", fontSize: 12.5, color: c.textMuted, margin: "6px 0 18px" }}>
             <Link2 size={14} />
             Weitere Personen kannst du später per Einladungslink hinzufügen.
@@ -923,7 +908,7 @@ function GruppenTab({ c, dark, me, projects, onOpen, onCreate }) {
               onCreate(name.trim(), participants, photo);
               setShowModal(false);
               setName("");
-              setParticipants([""]);
+              setParticipants([]);
               setPhoto(null);
             }}
             style={{ ...primaryButton(c), width: "100%", opacity: name.trim() ? 1 : 0.45 }}
