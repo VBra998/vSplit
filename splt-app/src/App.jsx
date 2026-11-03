@@ -1664,11 +1664,11 @@ function AddExpenseModal({ c, project, me, initial, onClose, onSave }) {
 
   return (
     <Modal c={c} onClose={onClose} title={isEdit ? "Ausgabe bearbeiten" : "Ausgabe hinzufügen"}>
+            <Field c={c} label="Beschreibung">
+        <input style={inputStyle(c)} value={description} onChange={(e) => handleDescriptionChange(e.target.value)} placeholder="z. B. Einkauf Rewe" autoFocus />
+      </Field>
       <Field c={c} label="Betrag (€)">
         <input style={inputStyle(c)} inputMode="decimal" value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="0,00" />
-      </Field>
-      <Field c={c} label="Beschreibung">
-        <input style={inputStyle(c)} value={description} onChange={(e) => handleDescriptionChange(e.target.value)} placeholder="z. B. Einkauf Rewe" />
       </Field>
 
       <Field c={c} label="Kategorie (automatisch erkannt, änderbar)">
