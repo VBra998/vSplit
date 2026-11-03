@@ -599,7 +599,7 @@ export default function App() {
         )}
 
         {screen === "main" && activeProject && (
-          <ProjectDetailScreen c={c} me={myName} project={activeProject} onBack={() => setActiveProjectId(null)} onUpdate={(fn) => updateProject(activeProject.id, fn)} onDeleteGroup={deleteGroup} />
+          <ProjectDetailScreen c={c} me={myName} project={activeProject} onBack={() => setActiveProjectId(null)} onUpdate={(fn) => updateProject(activeProject.id, fn)} onDeleteGroup={deleteGroup} friends={friends}/>
         )}
       </div>
     </div>
@@ -1215,7 +1215,7 @@ function AccountTab({ c, me, projects, onOpenGroup, onUpdateAvatar, onLogout }) 
 }
 
 // ---------- Project detail (full screen, image header) ----------
-function ProjectDetailScreen({ c, me, project, onBack, onUpdate, onDeleteGroup }) {
+function ProjectDetailScreen({ c, me, project, onBack, onUpdate, onDeleteGroup, friends }) {
   const [tab, setTab] = useState("ausgaben");
   const [showExpenseModal, setShowExpenseModal] = useState(false);
   const [editingExpense, setEditingExpense] = useState(null);
@@ -1280,16 +1280,21 @@ function ProjectDetailScreen({ c, me, project, onBack, onUpdate, onDeleteGroup }
     reader.readAsDataURL(file);
   }
 
-  async function addParticipant(name) {
-    if (!name.trim()) return;
-    const { data, error } = await supabase.from("group_members").insert({ group_id: project.id, display_name: name.trim() }).select().single();
+    async function addParticipant(list) {
+    const items = (Array.isArray(list) ? list : [{ name: list, userId: null }])
+      .map((p) => (typeof p === "string" ? { name: p, userId: null } : p))
+      .filter((p) => p && p.name && p.name.trim());
+    if (items.length === 0) return;
+    const { data, error } = await supabase
+      .from("group_members")
+      .insert(items.map((p) => ({ group_id: project.id, display_name: p.name.trim(), user_id: p.userId || null })))
+      .select();
     if (error) {
       alert("Fehler beim Hinzufügen: " + error.message);
       return;
     }
-    onUpdate((p) => ({ ...p, participants: [...p.participants, { id: data.id, name: data.display_name }] }));
+    onUpdate((p) => ({ ...p, participants: [...p.participants, ...data.map((m) => ({ id: m.id, name: m.display_name }))] }));
   }
-
     async function saveSettlement(s) {
     const { data, error } = await supabase
       .from("settlements")
@@ -1419,7 +1424,7 @@ function ProjectDetailScreen({ c, me, project, onBack, onUpdate, onDeleteGroup }
           <ExpensesTab c={c} me={me} project={project} myBalance={balances[me] || 0} onEdit={(exp) => { setEditingExpense(exp); setShowExpenseModal(true); }} onDelete={deleteExpense} />
         )}
         {tab === "schulden" && <SettlementsTab c={c} project={project} balances={balances} onSave={saveSettlement} onDelete={deleteSettlement} />}
-        {tab === "teilnehmer" && <TeilnehmerTab c={c} project={project} showAdd={showAddParticipant} setShowAdd={setShowAddParticipant} onAdd={addParticipant} />}
+        {tab === "teilnehmer" && <TeilnehmerTab c={c} project={project} showAdd={showAddParticipant} setShowAdd={setShowAddParticipant} onAdd={addParticipant} friends={friends} />}
         {tab === "ausgaben" && (
           <FabButton
             c={c}
@@ -1564,8 +1569,8 @@ function DebtsTab({ c, balances }) {
   );
 }
 
-function TeilnehmerTab({ c, project, showAdd, setShowAdd, onAdd }) {
-  const [name, setName] = useState("");
+function TeilnehmerTab({ c, project, showAdd, setShowAdd, onAdd, friends }) {
+  const [picked, setPicked] = useState([]);
   const [copied, setCopied] = useState(false);
   const inviteLink = `${window.location.origin}${window.location.pathname}?join=${project.inviteCode}`;
 
@@ -1605,21 +1610,21 @@ function TeilnehmerTab({ c, project, showAdd, setShowAdd, onAdd }) {
       </div>
 
       {showAdd && (
-        <Modal c={c} onClose={() => setShowAdd(false)} title="Teilnehmer manuell hinzufügen">
+        <Modal c={c} onClose={() => setShowAdd(false)} title="Teilnehmer hinzufügen">
           <div style={{ fontSize: 12, color: c.textMuted, marginBottom: 14, lineHeight: 1.5 }}>
-            Für Personen ohne eigenes Konto — sie können die App dann nicht selbst nutzen, tauchen aber in der Aufteilung auf.
+            Freunde erscheinen als Vorschlag und sind sofort mit ihrem Konto dabei. Reine Namen tauchen nur in der Aufteilung auf.
           </div>
-          <Field c={c} label="Name">
-            <input style={inputStyle(c)} value={name} onChange={(e) => setName(e.target.value)} placeholder="Name der Person" autoFocus />
+          <Field c={c} label="Personen">
+            <FriendPicker c={c} friends={friends} value={picked} onChange={setPicked} />
           </Field>
           <button
-            disabled={!name.trim()}
+            disabled={picked.length === 0}
             onClick={() => {
-              onAdd(name);
-              setName("");
+              onAdd(picked);
+              setPicked([]);
               setShowAdd(false);
             }}
-            style={{ ...primaryButton(c), width: "100%", opacity: name.trim() ? 1 : 0.45 }}
+            style={{ ...primaryButton(c), width: "100%", opacity: picked.length ? 1 : 0.45, marginTop: 10 }}
           >
             <UserPlus size={16} /> Hinzufügen
           </button>
